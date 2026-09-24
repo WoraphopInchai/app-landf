@@ -39,6 +39,9 @@ dist-ssr
 firebase-admin-key.json
 firebase-admin-key.json.*
 
+# ไฟล์ช่วยคัดลอก env (มีคีย์ลับ — ห้าม commit)
+vercel-env-template.txt
+
 # Load test ไฟล์ (ไม่เกี่wกับแอปจริง)
 loadtest*.js
 report.html
