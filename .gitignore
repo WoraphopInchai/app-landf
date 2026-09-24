@@ -38,3 +38,10 @@ dist-ssr
 # Firebase service account (ห้าม commit ขึ้น git โดยเด็ดขาด)
 firebase-admin-key.json
 firebase-admin-key.json.*
+
+# Load test ไฟล์ (ไม่เกี่wกับแอปจริง)
+loadtest*.js
+report.html
+
+# เอกสาร deploy เดิม (ล้าสมัย)
+DEPLOY_CHECKLIST.md
