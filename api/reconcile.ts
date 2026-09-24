@@ -1,8 +1,8 @@
 import type { VercelRequest, VercelResponse } from "@vercel/node";
 import * as admin from "firebase-admin";
-import { handleRequest, ok, sendJson } from "./_lib/http";
-import { db } from "./_lib/firebase";
-import { runAiMatchServer, needsScanServer, POSTS_PER_RECONCILE } from "./_lib/ai";
+import { handleRequest, ok, sendJson } from "./_lib/http.js";
+import { db } from "./_lib/firebase.js";
+import { runAiMatchServer, needsScanServer, POSTS_PER_RECONCILE } from "./_lib/ai.js";
 
 function cronAuthorized(req: VercelRequest): boolean {
   const secret = process.env.CRON_SECRET;

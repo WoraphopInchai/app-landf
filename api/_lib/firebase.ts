@@ -1,7 +1,7 @@
 import * as admin from "firebase-admin";
 import type { Firestore } from "firebase-admin/firestore";
 import type { VercelRequest } from "@vercel/node";
-import { ApiHttpError } from "./http";
+import { ApiHttpError } from "./http.js";
 
 let app: admin.app.App | null = null;
 

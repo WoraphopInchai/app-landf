@@ -48,3 +48,6 @@ report.html
 
 # เอกสาร deploy เดิม (ล้าสมัย)
 DEPLOY_CHECKLIST.md
+
+.vercel
+.env*

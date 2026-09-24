@@ -1,7 +1,7 @@
 import type { VercelRequest, VercelResponse } from "@vercel/node";
-import { ApiHttpError, handleRequest, ok, readJson } from "./_lib/http";
-import { authUid, db } from "./_lib/firebase";
-import type { AiMatchRecord } from "./_lib/ai";
+import { ApiHttpError, handleRequest, ok, readJson } from "./_lib/http.js";
+import { authUid, db } from "./_lib/firebase.js";
+import type { AiMatchRecord } from "./_lib/ai.js";
 
 interface ConfirmData {
   myPostId?: string;

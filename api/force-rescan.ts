@@ -1,7 +1,7 @@
 import type { VercelRequest, VercelResponse } from "@vercel/node";
-import { ApiHttpError, handleRequest, ok } from "./_lib/http";
-import { authUid, db } from "./_lib/firebase";
-import { runAiMatchServer } from "./_lib/ai";
+import { ApiHttpError, handleRequest, ok } from "./_lib/http.js";
+import { authUid, db } from "./_lib/firebase.js";
+import { runAiMatchServer } from "./_lib/ai.js";
 
 export default handleRequest(async (req: VercelRequest, res: VercelResponse) => {
   const uid = await authUid(req);
