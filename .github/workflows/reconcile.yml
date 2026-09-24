@@ -1,0 +1,25 @@
+name: Reconcile (AI match sweep)
+
+on:
+  schedule:
+    - cron: "*/10 * * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  reconcile:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Trigger Vercel reconcile API
+        env:
+          CRON_SECRET: ${{ secrets.CRON_SECRET }}
+        run: |
+          code=$(curl -sS -o /tmp/reconcile.json -w "%{http_code}" \
+            -X POST \
+            -H "Authorization: Bearer ${CRON_SECRET}" \
+            https://app-landf.vercel.app/api/reconcile)
+          echo "HTTP ${code}"
+          cat /tmp/reconcile.json
+          [ "$code" = "200" ] || exit 1

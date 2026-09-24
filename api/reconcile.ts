@@ -37,7 +37,7 @@ async function runMatchSweep(): Promise<{ postsDone: number; totalMatches: numbe
   const snap = await db()
     .collection("posts")
     .where("status", "in", ["active", "pending"])
-    .limit(500)
+    .limit(100)
     .get();
 
   const candidates = snap.docs
