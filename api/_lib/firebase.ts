@@ -1,4 +1,4 @@
-import * as admin from "firebase-admin";
+import admin from "firebase-admin";
 import type { Firestore } from "firebase-admin/firestore";
 import type { VercelRequest } from "@vercel/node";
 import { ApiHttpError } from "./http.js";
