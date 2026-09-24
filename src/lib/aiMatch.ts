@@ -84,3 +84,15 @@ export async function runForceRescan(): Promise<{
     {}
   );
 }
+
+// กวาดแบ็กกราวด์แบบ fire-and-forget: เรียกตอนเปิดแอป (ล็อกอินแล้ว)
+// server มี cooldown 60s + จำกัดโควตา Gemini ไว้แล้ว — เรียกถี่ได้ไม่เป็นไร
+// ไม่ throw ต่อผู้เรียก (แค่ log) เพราะเป็นงานรอง
+export async function triggerBackgroundSweep(): Promise<void> {
+  if (!auth.currentUser) return;
+  try {
+    await post<Record<string, never>, Record<string, unknown>>("/api/reconcile", {});
+  } catch (err) {
+    console.warn("[aiMatch] background sweep skipped:", (err as Error).message);
+  }
+}

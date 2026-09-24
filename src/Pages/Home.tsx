@@ -36,6 +36,7 @@ import {
   NEAR_MATCH_MAX_SCORE,
   confirmAiPair,
   runForceRescan,
+  triggerBackgroundSweep,
   type AiMatchRecord,
 } from "../lib/aiMatch";
 import { ITEM_CATEGORIES } from "../constants";
@@ -215,6 +216,13 @@ export default function Home({
       setIsSubmittingReport(false);
     }
   };
+
+  // กวาดคู่แนะนำ/จัดการ claims หมดอายุ แบบเงียบ ๆ ตอนเปิดแอป (ล็อกอินแล้ว)
+  useEffect(() => {
+    if (user) {
+      triggerBackgroundSweep();
+    }
+  }, [user]);
 
   // ดึงข้อมูลโพสต์แบบ Realtime (onSnapshot)
   useEffect(() => {

@@ -1,7 +1,7 @@
 import type { VercelRequest, VercelResponse } from "@vercel/node";
 import * as admin from "firebase-admin";
 import { handleRequest, ok, sendJson } from "./_lib/http.js";
-import { db } from "./_lib/firebase.js";
+import { authUid, db } from "./_lib/firebase.js";
 import { runAiMatchServer, needsScanServer, POSTS_PER_RECONCILE } from "./_lib/ai.js";
 
 function cronAuthorized(req: VercelRequest): boolean {
@@ -9,6 +9,28 @@ function cronAuthorized(req: VercelRequest): boolean {
   if (!secret) return false;
   const header = req.headers.authorization || "";
   return header === `Bearer ${secret}`;
+}
+
+// ผู้ใช้เปิดแอปแล้วเรียกกวาดเองได้ (โดยกว่าไม่ถี่เกิน 60 วินาที กันโควตา Gemini เหลือเกิน)
+const SWEEP_COOLDOWN_MS = 60_000;
+
+async function acquireUserCooldown(): Promise<boolean> {
+  const ref = db().collection("meta").doc("reconcileCooldown");
+  let allowed = false;
+  await db().runTransaction(async (tx) => {
+    const now = Date.now();
+    const snap = await tx.get(ref);
+    const last = snap.data()?.lastRunAt as
+      | admin.firestore.Timestamp
+      | string
+      | undefined;
+    let lastMs = 0;
+    if (last) lastMs = typeof last === "string" ? Date.parse(last) : last.toMillis();
+    if (Number.isFinite(lastMs) && now - lastMs < SWEEP_COOLDOWN_MS) return;
+    allowed = true;
+    tx.set(ref, { lastRunAt: admin.firestore.Timestamp.now() }, { merge: true });
+  });
+  return allowed;
 }
 
 async function runMatchSweep(): Promise<{ postsDone: number; totalMatches: number }> {
@@ -123,8 +145,21 @@ async function expireStaleClaims(): Promise<number> {
 }
 
 export default handleRequest(async (req: VercelRequest, res: VercelResponse) => {
-  if (!cronAuthorized(req)) {
-    return sendJson(res, 401, { error: "unauthorized" });
+  const isCron = cronAuthorized(req);
+
+  if (!isCron) {
+    const userAuthorized = await authUid(req)
+      .then(() => true)
+      .catch(() => false);
+    if (!userAuthorized) {
+      return sendJson(res, 401, { error: "unauthorized" });
+    }
+    const allowed = await acquireUserCooldown();
+    if (!allowed) {
+      return sendJson(res, 429, {
+        error: "กวาดคู่แนะนำเพิ่งถูกเรียกเมื่อไม่นานมานี้ ให้ลองใหม่อีกครั้งสักครู่",
+      });
+    }
   }
 
   const [sweep, expiredClaims] = await Promise.all([
