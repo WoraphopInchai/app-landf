@@ -1,0 +1,503 @@
+// UP Lost & Found - Firestore Security Rules
+// วิธีใช้งาน: ไปที่ Firebase Console -> Firestore Database -> Rules -> วางโค้ดนี้แทนทั้งหมด -> Publish
+// หรือถ้าใช้ Firebase CLI: firebase deploy --only firestore:rules (ต้องมี firebase.json + .firebaserc ก่อน)
+
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // ---------- Helper functions ----------
+    function isLoggedIn() {
+      return request.auth != null;
+    }
+
+    // หัวหน้าแอดมิน (super admin):
+    //  - role == 'super_admin'  (หลังล็อกอินรอบแรกด้วยอีเมลใน whitelist จะถูกเขียนจาก 'admin' เป็น 'super_admin')
+    //  - หรือ role == 'admin' และอีเมลใน whitelist (กรณีผู้ดูแลเดิมที่ยังไม่ได้ล็อกอินใหม่อีกครั้ง)
+    function isSuperAdmin(uid) {
+      let u = get(/databases/$(database)/documents/users/$(uid)).data;
+      return u.role == 'super_admin' ||
+        (u.role == 'admin' && u.email in [
+          'admin@up.ac.th',
+          'lostfound.admin@up.ac.th',
+          'kaw44588@gmail.com',
+          'aonnn4554@gmail.com',
+          'aonn4554@gmail.com'
+        ]);
+    }
+
+    // เจ้าหน้าที่ประจำจุด (staff admin): role == 'admin' และมี adminAccounts/{email} อยู่
+    // (ระบบ adminAccounts เป็นแหล่งอ้างอิงสิทธิ์ — นำออกจาก adminAccounts = ถูกถอดสิทธิ์ทันที)
+    function isStaffAdmin(uid) {
+      return get(/databases/$(database)/documents/users/$(uid)).data.role == 'admin' &&
+        request.auth.token.email != null &&
+        exists(/databases/$(database)/documents/adminAccounts/$(request.auth.token.email));
+    }
+
+    function isAdmin(uid) {
+      return isSuperAdmin(uid) || isStaffAdmin(uid);
+    }
+
+    // จุดคืนของเจ้าหน้าที่ที่กำลังทำรายการอยู่ (อ้างอิงจาก adminAccounts ปัจจุบัน)
+    function staffPointName() {
+      return get(/databases/$(database)/documents/adminAccounts/$(request.auth.token.email)).data.pointName;
+    }
+
+    // อีเมลใน whitelist — ตั้ง role 'super_admin' ได้ (เฉพาะหัวหน้าแอดมินดั้งเดิม)
+    function isAdminEmail() {
+      return request.auth.token.email in [
+        'admin@up.ac.th',
+        'lostfound.admin@up.ac.th',
+        'kaw44588@gmail.com',
+        'aonnn4554@gmail.com',
+        'aonn4554@gmail.com'
+      ];
+    }
+
+    // ตรวจว่า role ที่ผู้ใช้จะ "ตั้งให้ตัวเอง" เราอนุญาตไหม (ตอนล็อกอิน/แก้โปรไฟล์)
+    function canSetOwnRole() {
+      return request.resource.data.role in ['user', 'super_admin', 'admin'] &&
+        !(request.resource.data.role == 'super_admin' && !isAdminEmail()) &&
+        !(request.resource.data.role == 'admin' &&
+          (request.auth.token.email == null ||
+            !exists(/databases/$(database)/documents/adminAccounts/$(request.auth.token.email))));
+    }
+
+    // กรณีแก้ role ของตัวเอง: ถ้าไม่มี field role ใน request = ไม่แตะ role ให้ผ่าน
+    function selfRoleOk() {
+      return !('role' in request.resource.data) ||
+        request.resource.data.role == resource.data.role ||
+        canSetOwnRole();
+    }
+
+    function isChatParticipant(chatId) {
+      return isLoggedIn() &&
+        request.auth.uid in get(/databases/$(database)/documents/chats/$(chatId)).data.participantIds;
+    }
+
+    function isPostOwner(uid, postId) {
+      return exists(/databases/$(database)/documents/posts/$(postId)) &&
+        get(/databases/$(database)/documents/posts/$(postId)).data.userId == uid;
+    }
+
+    // เจ้าของโพสต์ปิดคำขอรับของได้เฉพาะตอนลบโพสต์ (status → post_deleted เท่านั้น)
+    // — กันผู้ใช้ทั่วไปไปแก้/จองคำขอของคนอื่นผ่านช่องทางเจ้าของโพสต์
+    function canOwnerCloseDeletedPostClaim() {
+      return isPostOwner(request.auth.uid, resource.data.postId) &&
+        request.resource.data.status == 'post_deleted' &&
+        request.resource.data.diff(resource.data).affectedKeys().hasOnly([
+          'status', 'reviewedAt', 'rejectReason'
+        ]);
+    }
+
+    function isBanned(uid) {
+      return exists(/databases/$(database)/documents/users/$(uid)) &&
+        get(/databases/$(database)/documents/users/$(uid)).data.banned == true;
+    }
+
+    // คำขอรับของใหม่ต้องอ้างอิงโพสต์ของพบที่มีอยู่จริง จุดตรงกัน และอายุไม่เกินกำหนด
+    // (กันสร้างคำขอปลอม/ชี้จุดอื่น/ล็อกโพสต์ถาวรด้วย expiresAtMs ที่ไกลเกินควร)
+    function canCreateValidClaim() {
+      let post = get(/databases/$(database)/documents/posts/$(request.resource.data.postId));
+      return exists(/databases/$(database)/documents/posts/$(request.resource.data.postId)) &&
+        post.data.itemType == 'found' &&
+        request.resource.data.depositLocation == post.data.depositLocation &&
+        request.resource.data.expiresAtMs >= request.time.toMillis() - 5 * 60 * 1000 &&
+        request.resource.data.expiresAtMs <= request.time.toMillis() + 7 * 24 * 60 * 60 * 1000;
+    }
+
+    // ผู้ใช้ทั่วไป "กริ่งแอดมิน" ต้องอ้างอิงข้อมูลจริง ไม่ใช่ค่าปลอม
+    //  - claim: ต้องมีคำขอจริงของผู้ใช้คนนี้ ผูกโพสต์จริง และ pointName==จุดของโพสต์
+    //  - found_pending/post_report: ต้องมีผู้รายงาน และ pointName (ถ้ามี) ตรงจุดของโพสต์
+    //  - support_message: ต้องลงชื่อตัวเอง และห้ามสวม pointName/postId
+    // (Firestore rules ไม่มี if statement — เขียนเป็นเงื่อนไข &&/|| ล้วน)
+    function canNotifyAdminCreate() {
+      let t = request.resource.data.type;
+      return
+        (t == 'claim' &&
+          'claimId' in request.resource.data &&
+          'postId' in request.resource.data &&
+          'pointName' in request.resource.data &&
+          exists(/databases/$(database)/documents/claims/$(request.resource.data.claimId)) &&
+          exists(/databases/$(database)/documents/posts/$(request.resource.data.postId)) &&
+          get(/databases/$(database)/documents/claims/$(request.resource.data.claimId)).data.claimantId == request.auth.uid &&
+          get(/databases/$(database)/documents/claims/$(request.resource.data.claimId)).data.postId == request.resource.data.postId &&
+          request.resource.data.pointName == get(/databases/$(database)/documents/posts/$(request.resource.data.postId)).data.depositLocation)
+        ||
+        ((t == 'found_pending' || t == 'post_report') &&
+          'postId' in request.resource.data &&
+          'reporterId' in request.resource.data &&
+          request.resource.data.reporterId == request.auth.uid &&
+          exists(/databases/$(database)/documents/posts/$(request.resource.data.postId)) &&
+          (!('pointName' in request.resource.data) ||
+            request.resource.data.pointName == get(/databases/$(database)/documents/posts/$(request.resource.data.postId)).data.depositLocation))
+        ||
+        (t == 'support_message' &&
+          'reporterId' in request.resource.data &&
+          request.resource.data.reporterId == request.auth.uid &&
+          !('pointName' in request.resource.data) &&
+          !('postId' in request.resource.data));
+    }
+
+    // เจ้าของโพสต์แจ้งผล (claim_result): ต้องมีคำขอจริงผูกกับโพสต์จริง (กันแจ้งปลอมไปที่ใครก็ได้)
+    function canNotifyClaimResultByOwner() {
+      return
+        'claimId' in request.resource.data &&
+        'postId' in request.resource.data &&
+        isPostOwner(request.auth.uid, request.resource.data.postId) &&
+        exists(/databases/$(database)/documents/claims/$(request.resource.data.claimId)) &&
+        get(/databases/$(database)/documents/claims/$(request.resource.data.claimId)).data.postId ==
+          request.resource.data.postId;
+    }
+
+    // อนุญาตให้ผู้ยื่นคำขอ pending ที่เป็นเจ้าของคำขอนั้นจองโพสต์ได้
+    // ถ้ามี reservation เก่า (คนก่อนหน้ายังจองอยู่และยัง pending) จะถูกบล็อก — กันจองซ้อน
+    // ถ้า reservation เก่าถูกลบ/เปลี่ยนสถานะแล้ว (เช่น expired, rejected, post_deleted) → จองใหม่ได้ โดยไม่ต้องรอแอดมิน
+    function canReserve(postId) {
+      let claimId = request.resource.data.reservationClaimId;
+      let oldReservationGone =
+        !('reservationClaimId' in resource.data) ||
+        resource.data.reservationClaimId == claimId ||
+        !exists(/databases/$(database)/documents/claims/$(resource.data.reservationClaimId)) ||
+        get(/databases/$(database)/documents/claims/$(resource.data.reservationClaimId)).data.status != 'pending' ||
+        (('expiresAt' in get(/databases/$(database)/documents/claims/$(resource.data.reservationClaimId)).data) &&
+          ('expiresAtMs' in get(/databases/$(database)/documents/claims/$(resource.data.reservationClaimId)).data) &&
+          get(/databases/$(database)/documents/claims/$(resource.data.reservationClaimId)).data.expiresAtMs < request.time.toMillis());
+      return isLoggedIn()
+        && request.resource.data.status == 'in_progress'
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['status', 'inProgressAt', 'reservationClaimId'])
+        && oldReservationGone
+        && exists(/databases/$(database)/documents/claims/$(claimId))
+        && get(/databases/$(database)/documents/claims/$(claimId)).data.postId == postId
+        && get(/databases/$(database)/documents/claims/$(claimId)).data.claimantId == request.auth.uid
+        && get(/databases/$(database)/documents/claims/$(claimId)).data.status == 'pending';
+    }
+
+    // เจ้าหน้าที่ประจำจุดสามารถ "อนุมัติ/ปฏิเสธ" โพสต์ของพบที่จุดของตัวเองเท่านั้น
+    // (เปลี่ยนแปลงสถานะ/เวลาอนุมัติเท่านั้น — ห้ามแก้ userId, depositLocation, เนื้อหาโพสต์)
+    // กันส่งคืนซ้ำ (double hand-out): ห้ามเปลี่ยนโพสต์ที่ resolved แล้วไปเป็นสถานะอื่นอีก
+    function canStaffApproveFoundPost() {
+      return isStaffAdmin(request.auth.uid) &&
+        request.resource.data.itemType == 'found' &&
+        resource.data.itemType == 'found' &&
+        resource.data.depositLocation == staffPointName() &&
+        request.resource.data.userId == resource.data.userId &&
+        request.resource.data.depositLocation == resource.data.depositLocation &&
+        (!('status' in request.resource.data) ||
+          request.resource.data.status in ['active', 'in_progress', 'rejected', 'resolved']) &&
+        !(('status' in request.resource.data) &&
+          resource.data.status == 'resolved' &&
+          request.resource.data.status != 'resolved') &&
+        request.resource.data.diff(resource.data).affectedKeys().hasOnly([
+          'status', 'approvedAt', 'rejectedAt', 'resolvedAt',
+          'reservationClaimId', 'inProgressAt'
+        ]);
+    }
+
+    // เจ้าหน้าที่ประจำจุดจัดการโพสต์ที่จุดตัวเอง (ระงับ/กู้คืน/ปลดอายัด ที่หน้า "จัดการโพสต์")
+    // แก้ได้เฉพาะ status (suspended/active) + suspendedAt — ห้ามแตะ userId/itemType/depositLocation/เนื้อหา
+    function canStaffModeratePointPost() {
+      return isStaffAdmin(request.auth.uid) &&
+        resource.data.depositLocation == staffPointName() &&
+        request.resource.data.userId == resource.data.userId &&
+        request.resource.data.itemType == resource.data.itemType &&
+        request.resource.data.depositLocation == resource.data.depositLocation &&
+        (!('status' in request.resource.data) ||
+          request.resource.data.status in ['suspended', 'active']) &&
+        request.resource.data.diff(resource.data).affectedKeys().hasOnly([
+          'status', 'suspendedAt'
+        ]);
+    }
+
+    // เจ้าหน้าที่ประจำจุดจัดการคำขอรับของของโพสต์ที่อยู่ที่จุดตัวเองเท่านั้น
+    // กัน "ของชิ้นเดียวส่ง 2 คน": ห้ามอนุมัติคำขอเมื่อโพสต์ resolved แล้ว (ส่งมอบไปแล้ว),
+    // หรือเมื่อคำขอนี้ approved ไปแล้ว — ดู flow จริงที่เป็น transaction ใน Admin.tsx (handleApprove)
+    function canStaffManageClaim() {
+      let post = get(/databases/$(database)/documents/posts/$(resource.data.postId));
+      return isStaffAdmin(request.auth.uid) &&
+        exists(/databases/$(database)/documents/posts/$(resource.data.postId)) &&
+        post.data.itemType == 'found' &&
+        post.data.depositLocation == staffPointName() &&
+        request.resource.data.status in ['approved', 'rejected', 'expired'] &&
+        !(resource.data.status == 'approved') &&
+        !(request.resource.data.status == 'approved' && post.data.status == 'resolved') &&
+        request.resource.data.diff(resource.data).affectedKeys().hasOnly([
+          'status', 'reviewedAt', 'rejectReason', 'reviewedByUid', 'expiredAt'
+        ]);
+    }
+
+// =============================================
+    // users  - ข้อมูลส่วนตัวอ่านได้เฉพาะเจ้าของตัวเองหรือหัวหน้าแอดมิน
+    //          (user/เจ้าหน้าที่ ไม่สามารถดูข้อมูลส่วนตัวของ user อื่นได้)
+    // เขียนได้เฉพาะเจ้าของตัวเอง
+    //   - ผู้ใช้แก้ชื่อ/เบอร์/อีเมล/avatar ได้ (ฟิลด์ปกติ)
+    //   - role ตั้งได้เท่าที่ระบบอนุญาต (user เสมอ, super_admin เฉพาะ whitelist, admin เฉพาะมี adminAccounts)
+    //   - ห้ามแก้ banned เอง (ให้หัวหน้าแอดมิน ban/unban)
+    // =============================================
+    match /users/{uid} {
+      allow read: if isLoggedIn() && (
+        request.auth.uid == uid ||
+        isSuperAdmin(request.auth.uid)
+      );
+      allow create: if isLoggedIn() && request.auth.uid == uid &&
+        !isBanned(request.auth.uid) &&
+        request.resource.data.banned != true &&
+        canSetOwnRole();
+      allow update: if isLoggedIn() && (
+        isSuperAdmin(request.auth.uid) ||
+        (request.auth.uid == uid &&
+          (request.resource.data.banned == resource.data.banned ||
+            (!('banned' in resource.data) && request.resource.data.banned == false)) &&
+          selfRoleOk())
+      );
+      allow delete: if isLoggedIn() && isSuperAdmin(request.auth.uid);
+    }
+
+    // =============================================
+    // returnPoints - จุดคืนของ (ป้อมยาม/เจ้าหน้าที่ประจำตึก ฯลฯ)
+    // อ่าน: ผู้ใช้ทั่วไปที่ล็อกอินอ่านได้ (ใช้เป็นตัวเลือกจุดฝากของในแบบฟอร์ม)
+    // เขียน: หัวหน้าแอดมินเท่านั้น (เพิ่ม/เปลี่ยนชื่อจุดคืน)
+    // =============================================
+    match /returnPoints/{pointId} {
+      allow read: if isLoggedIn();
+      allow create: if isLoggedIn() && isSuperAdmin(request.auth.uid);
+      allow update: if isLoggedIn() && isSuperAdmin(request.auth.uid);
+      allow delete: if isLoggedIn() && isSuperAdmin(request.auth.uid);
+    }
+
+    // =============================================
+    // adminAccounts - บัญชีเจ้าหน้าที่ประจำจุด (key = อีเมล Google ที่ยืนยันแล้ว)
+    // อ่าน: หัวหน้าแอดมิน หรือเจ้าของอีเมลนั้น (ใช้เช็กสิทธิ์ตอนล็อกอิน)
+    // เขียน: หัวหน้าแอดมินเพิ่ม/แก้/ลบ (swap อีเมล = แก้ field uid ให้เจ้าหน้าที่ใหม่ทันที)
+    //        เจ้าหน้าที่เองแก้ได้เฉพาะ uid/lastLoginAt ของตัวเอง (ห้ามเปลี่ยนจุดของตัวเอง)
+    // =============================================
+    match /adminAccounts/{email} {
+      allow read: if isLoggedIn() && (
+        isSuperAdmin(request.auth.uid) ||
+        (request.auth.token.email != null && request.auth.token.email == email)
+      );
+      allow create: if isLoggedIn() && isSuperAdmin(request.auth.uid);
+      allow update: if isLoggedIn() && (
+        isSuperAdmin(request.auth.uid) ||
+        (request.auth.token.email != null && request.auth.token.email == email &&
+          request.resource.data.pointId == resource.data.pointId &&
+          request.resource.data.pointName == resource.data.pointName &&
+          request.resource.data.diff(resource.data).affectedKeys().hasOnly(['uid', 'lastLoginAt']))
+      );
+      allow delete: if isLoggedIn() && (
+        isSuperAdmin(request.auth.uid) ||
+        (request.auth.token.email != null && request.auth.token.email == email)
+      );
+    }
+
+    // =============================================
+    // posts  - โพสต์ของหาย/ของพบ
+    // โพสต์ของหาย (lost) โพสต์ได้ทันที ต้อง active (จัดการโดยหัวหน้าแอดมิน)
+    // โพสต์ของที่พบ (found) ต้องรอแอดมิน/เจ้าหน้าที่ประจำจุดตรวจรับของก่อน -> สร้างด้วย status pending
+    // pending/rejected อ่านได้เฉพาะเจ้าของโพสต์กับแอดมิน (ไม่โผล่หน้าสาธารณะ)
+    // =============================================
+    function canCreatePostExisting() {
+      return request.auth.uid == request.resource.data.userId &&
+        ((request.resource.data.itemType == 'lost' && request.resource.data.status == 'active') ||
+         (request.resource.data.itemType == 'found' && request.resource.data.status == 'pending'));
+    }
+
+    match /posts/{postId} {
+      // แอดมินหัวหน้า: อ่านทุกโพสต์
+      // เจ้าหน้าที่ประจำจุด: อ่านเฉพาะโพสต์ที่จุดตัวเอง (กันรู้ข้อมูลจุดอื่น)
+      // เจ้าของ: อ่านโพสต์ตัวเอง / คนทั่วไป: อ่านเฉพาะโพสต์ที่เผยแพร่แล้ว
+      // คนทั่วไป (รวมผู้ที่ยังไม่เข้าสู่ระบบ): อ่านเฉพาะโพสต์ที่เผยแพร่แล้ว
+      // แอดมิน/เจ้าหน้าที่/เจ้าของ: อ่านเพิ่มเติมได้ตามสิทธิ
+      allow read: if
+        (resource.data.status != 'pending' && resource.data.status != 'rejected') ||
+        (isLoggedIn() && (
+          isSuperAdmin(request.auth.uid) ||
+          (isStaffAdmin(request.auth.uid) &&
+            resource.data.depositLocation == staffPointName()) ||
+          request.auth.uid == resource.data.userId
+        ));
+      allow create: if isLoggedIn() &&
+        !isBanned(request.auth.uid) &&
+        canCreatePostExisting();
+      // หัวหน้าแอดมิน: แก้โพสต์ใดก็ได้
+      // เจ้าหน้าที่: อนุมัติ/ปฏิเสธโพสต์ของพบที่จุดตัวเองเท่านั้น (ดู canStaffApproveFoundPost)
+      // เจ้าของ: แก้โพสต์ได้แต่ห้ามเปลี่ยน status (กัน self-approve) — จอง/เขียนผล AI ได้ตามปกติ
+      allow update: if isLoggedIn() && (
+        isSuperAdmin(request.auth.uid) ||
+        canStaffApproveFoundPost() ||
+        canStaffModeratePointPost() ||
+        canReserve(postId) ||
+        (!isBanned(request.auth.uid) &&
+          request.auth.uid == resource.data.userId &&
+          !request.resource.data.diff(resource.data).affectedKeys().hasAny(['matches', 'aiData', 'nearMatches']) &&
+          request.resource.data.status == resource.data.status &&
+          request.resource.data.itemType == resource.data.itemType &&
+          request.resource.data.depositLocation == resource.data.depositLocation)
+      );
+      allow delete: if isLoggedIn() && (
+        request.auth.uid == resource.data.userId ||
+        isSuperAdmin(request.auth.uid) ||
+        (isStaffAdmin(request.auth.uid) &&
+          resource.data.depositLocation == staffPointName())
+      );
+    }
+
+    // =============================================
+    // chats  - ห้องแชท 1 ต่อ 1 ต่อโพสต์
+    // อ่าน/เขียนได้เฉพาะคนที่อยู่ใน participantIds
+    // =============================================
+    match /chats/{chatId} {
+      allow read: if isLoggedIn() &&
+        request.auth.uid in resource.data.participantIds;
+      allow create: if isLoggedIn() &&
+        !isBanned(request.auth.uid) &&
+        request.auth.uid in request.resource.data.participantIds;
+      allow update: if isLoggedIn() &&
+        request.auth.uid in resource.data.participantIds;
+      // ลบแชทได้เฉพาะคนในห้อง (ใช้ฟีเจอร์ปัดซ้ายลบแชท)
+      allow delete: if isLoggedIn() && isChatParticipant(chatId);
+
+      // ------- messages -------
+      // อ่านได้เฉพาะคนร่วมแชท ส่งได้เฉพาะ senderId == ตัวเอง
+      // ลบได้เฉพาะคนร่วมแชท (ลบพร้อมทั้งห้อง เมื่อลบแชททั้งห้อง)
+      match /messages/{msgId} {
+        allow read: if isChatParticipant(chatId);
+        allow create: if isChatParticipant(chatId) &&
+          !isBanned(request.auth.uid) &&
+          request.resource.data.senderId == request.auth.uid;
+        allow update: if false;
+        allow delete: if isChatParticipant(chatId);
+      }
+    }
+
+    // =============================================
+    // claims  - คำขอรับของ (ส่งถึงแอดมิน/เจ้าหน้าที่ประจำจุด)
+    // สร้างได้เฉพาะผู้ขอ (status ต้องเป็น pending)
+    // อ่าน/แก้ไขได้เฉพาะหัวหน้าแอดมิน + เจ้าของโพสต์ + ผู้ขอของตัวเอง
+    // เจ้าหน้าที่ @ จุด: อนุมัติ/ปฏิเสธเฉพาะคำขอของโพสต์ที่จุดตัวเอง (ดู canStaffManageClaim)
+    // =============================================
+    match /claims/{claimId} {
+      allow create: if isLoggedIn() &&
+        !isBanned(request.auth.uid) &&
+        request.resource.data.claimantId == request.auth.uid &&
+        request.resource.data.status == 'pending' &&
+        request.resource.data.postId is string &&
+        canCreateValidClaim();
+      // หัวหน้าแอดมิน: อ่านทุกคำขอ
+      // เจ้าหน้าที่ประจำจุด: อ่านเฉพาะคำขอของโพสต์ที่จุดตัวเอง (depositLocation บน claim ตรงกับจุด)
+      // ผู้ขอ/เจ้าของโพสต์: อ่านของตัวเองเท่านั้น
+      allow read: if isLoggedIn() && (
+        resource.data.claimantId == request.auth.uid ||
+        isPostOwner(request.auth.uid, resource.data.postId) ||
+        (isSuperAdmin(request.auth.uid)) ||
+        (isStaffAdmin(request.auth.uid) &&
+          resource.data.depositLocation == staffPointName())
+      );
+      allow update: if isLoggedIn() && (
+        isSuperAdmin(request.auth.uid) ||
+        canStaffManageClaim() ||
+        canOwnerCloseDeletedPostClaim() ||
+        (resource.data.claimantId == request.auth.uid &&
+          request.resource.data.diff(resource.data).affectedKeys().hasOnly(['claimantName']))
+      );
+      // ผู้ขอสามารถลบคำขอ pending ของตัวเองเท่านั้น (ใช้ rollback เมื่อจองโพสต์ไม่สำเร็จ/ยกเลิกเอง)
+      // — ห้ามลบคำขอที่ถูกพิจารณาแล้ว (approved/rejected/expired/post_deleted)
+      allow delete: if isLoggedIn() &&
+        resource.data.claimantId == request.auth.uid &&
+        resource.data.status == 'pending';
+    }
+
+    // =============================================
+    // reports - คำขอรายงานปัญหา/ติดต่อแอดมิน (จากหน้า Profile)
+    // สร้างได้เฉพาะเจ้าของตัวเอง อ่านได้เฉพาะผู้สร้างและแอดมิน
+    // =============================================
+    match /reports/{reportId} {
+      allow create: if isLoggedIn() &&
+        !isBanned(request.auth.uid) &&
+        request.resource.data.reporterId == request.auth.uid &&
+        request.resource.data.status == 'open';
+      allow read: if isLoggedIn() && (
+        resource.data.reporterId == request.auth.uid ||
+        isPostOwner(request.auth.uid, resource.data.postId) ||
+        isAdmin(request.auth.uid)
+      );
+      // แก้ได้เฉพาะแอดมินและเจ้าของโพสต์ — จำกัดเหลือ field `status` เท่านั้น
+      // (กันลบ/แก้ report ปกปิด: เจ้าของแก้ได้แค่ตอนลบโพสต์เอง → status = post_deleted)
+      // ผู้รายงานเปลี่ยนชื่อตัวเองได้เฉพาะ field `reporterName` (กันแก้ field อื่น)
+      allow update: if isLoggedIn() && (
+        (isAdmin(request.auth.uid) &&
+          request.resource.data.diff(resource.data).affectedKeys().hasOnly(['status'])) ||
+        (isPostOwner(request.auth.uid, resource.data.postId) &&
+          request.resource.data.status == 'post_deleted' &&
+          request.resource.data.diff(resource.data).affectedKeys().hasOnly(['status'])) ||
+        (resource.data.reporterId == request.auth.uid &&
+          request.resource.data.diff(resource.data).affectedKeys().hasOnly(['reporterName']))
+      );
+      allow delete: if false;
+    }
+
+    // =============================================
+    // notifications - การแจ้งเตือนในแอป
+    // สร้างได้ทุกคนที่ล็อกอิน (เช่น ระบบสร้างตอนขอรับของ)
+    // อ่าน/แก้ไขได้เฉพาะผู้รับ (recipient_role = admin หรือ recipientUid == ตัวเอง)
+    // =============================================
+    match /notifications/{notificationId} {
+      // อนุญาตเฉพาะ: แจ้งตัวเอง, แจ้งกริ่งแอดมินที่อ้างอิงข้อมูลจริง (ดู canNotifyAdminCreate), แอดมินแจ้งใครก็ได้, และเจ้าของโพสต์แจ้งผลแก่ผู้ยื่นขอของโพสต์ตัวเอง
+      // (ทั้ง 3 branch ของ user ห้ามตั้ง recipientRole == 'admin' — กัน create notification ผ่าน self/owner แล้วแปะ recipientRole+pointName จุดอื่นปลอมกริ่ง)
+      allow create: if isLoggedIn() && !isBanned(request.auth.uid) && (
+        (request.resource.data.recipientUid == request.auth.uid &&
+          (!('recipientRole' in request.resource.data) ||
+            request.resource.data.recipientRole != 'admin')) ||
+        (request.resource.data.recipientRole == 'admin' &&
+          request.resource.data.type in ['claim', 'found_pending', 'post_report', 'support_message'] &&
+          canNotifyAdminCreate()) ||
+        isAdmin(request.auth.uid) ||
+        (request.resource.data.type == 'claim_result' &&
+          (!('recipientRole' in request.resource.data) ||
+            request.resource.data.recipientRole != 'admin') &&
+          canNotifyClaimResultByOwner())
+      );
+      allow read: if isLoggedIn() && (
+        (resource.data.recipientRole == 'admin' &&
+          (isSuperAdmin(request.auth.uid) ||
+            (isStaffAdmin(request.auth.uid) &&
+              resource.data.pointName == staffPointName()))) ||
+        resource.data.recipientUid == request.auth.uid
+      );
+      // แก้ได้เฉพาะ mark read (recipientUid==ตัวเอง / แอดมินฝั่งจุดตัวเอง) — กันแก้เป็นแอดมิน/จุดปลอม
+      // หัวหน้าแอดมินเพิ่มแก้ pointName ได้ (ใช้ตอนเปลี่ยนชื่อจุดคืน)
+      allow update: if isLoggedIn() && (
+        (request.resource.data.diff(resource.data).affectedKeys().hasOnly(['read']) &&
+          ((resource.data.recipientRole == 'admin' &&
+            (isSuperAdmin(request.auth.uid) ||
+              (isStaffAdmin(request.auth.uid) &&
+                resource.data.pointName == staffPointName()))) ||
+            resource.data.recipientUid == request.auth.uid)) ||
+        (isSuperAdmin(request.auth.uid) &&
+          request.resource.data.diff(resource.data).affectedKeys().hasOnly(['read', 'pointName']))
+      );
+      // ลบได้เฉพาะผู้รับ (ลบการแจ้งเตือนของตัวเองเท่านั้น) — แอดมินลบ notification ฝั่ง admin bell ได้
+      allow delete: if isLoggedIn() && (
+        resource.data.recipientUid == request.auth.uid ||
+        (resource.data.recipientRole == 'admin' && isAdmin(request.auth.uid))
+      );
+    }
+
+    // =============================================
+    // stats - สถิติสาธารณะสำหรับหน้า Login
+    // อ่านได้ทุกคนแม้ยังไม่ล็อกอิน (เก็บแค่ตัวเลขรวม ไม่มีข้อมูลส่วนตัว)
+    // เขียนได้เฉพาะแอดมิน (กันผู้ใช้ทั่วไปแก้/สปอยล์ตัวเลข)
+    // =============================================
+    match /stats/{statId} {
+      allow read: if true;
+      allow write: if statId == 'login' && isAdmin(request.auth.uid);
+    }
+
+    // =============================================
+    // เปิดไว้สำหรับคอลเลกชันอื่น ๆ ในอนาคต
+    // match /{collection} {
+    //   allow read, write: if isLoggedIn();
+    // }
+    // =============================================
+  }
+}

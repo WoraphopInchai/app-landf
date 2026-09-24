@@ -1,0 +1,309 @@
+html,
+body,
+#root {
+  margin: 0;
+  min-height: 100%;
+  width: 100%;
+  height: 100%;
+}
+
+/* =========================================================
+   Frame.io — Dark Modern SaaS Design Tokens
+   ========================================================= */
+:root {
+  --bg: #0b0a10;
+  --bg-subtle: #131019;
+  --bg-card: #161320;
+  --bg-hover: #1f1b2e;
+  --bg-ghost: #221d33;
+  --fg: #ffffff;
+  --fg-strong: #ece9f5;
+  --fg-secondary: #b3b1bf;
+  --fg-muted: #9b99a8;
+  --fg-faint: #767486;
+  --fg-dim: #565268;
+  --fg-accent: #c4b5fd;
+  --border: #302a40;
+  --border-strong: #453e5e;
+  --accent: #7c5cfc;
+  --accent-hover: #6a4eff;
+  --accent-soft: rgba(124, 92, 252, 0.18);
+  --accent-soft-border: rgba(124, 92, 252, 0.45);
+  --accent-fg: #ffffff;
+  --glass: rgba(255, 255, 255, 0.04);
+  --glass-strong: rgba(255, 255, 255, 0.07);
+  --success: #34d399;
+  --lost: #fb923c;
+  --found: #34d399;
+  --danger: #f87171;
+  --danger-bg: #2a1418;
+  --danger-border: #4a1f28;
+  --danger-fg: #fca5a5;
+  --radius: 12px;
+  --radius-sm: 8px;
+  --shadow-xs: 0 1px 2px rgba(0, 0, 0, 0.45);
+  --shadow-sm: 0 3px 10px rgba(0, 0, 0, 0.45);
+  --shadow-md: 0 10px 28px rgba(0, 0, 0, 0.5);
+  --glow: 0 0 0 1px rgba(124, 92, 252, 0.5), 0 8px 32px rgba(124, 92, 252, 0.4);
+}
+
+/* =========================================================
+   โหมดสว่าง (Light Mode) — เปิดด้วย data-theme="light"
+   ไอคอน/ปุ่มสีม่วง (--accent) ยังใช้ --accent-fg เป็นข้อความขาว
+   ========================================================= */
+[data-theme="light"] {
+  --bg: #f3f1fa;
+  --bg-subtle: #ffffff;
+  --bg-card: #ffffff;
+  --bg-hover: #ece8f7;
+  --bg-ghost: #e3def4;
+  --fg: #17131f;
+  --fg-strong: #2a2438;
+  --fg-secondary: #4a4560;
+  --fg-muted: #635e7a;
+  --fg-faint: #837e98;
+  --fg-dim: #a6a2bb;
+  --fg-accent: #6d4df0;
+  --border: #d6d0ec;
+  --border-strong: #b9b1df;
+  --accent: #7c5cfc;
+  --accent-hover: #6a4eff;
+  --accent-soft: rgba(124, 92, 252, 0.14);
+  --accent-soft-border: rgba(124, 92, 252, 0.45);
+  --accent-fg: #ffffff;
+  --glass: rgba(20, 15, 35, 0.05);
+  --glass-strong: rgba(20, 15, 35, 0.07);
+  --success: #10b981;
+  --lost: #f97316;
+  --found: #10b981;
+  --danger: #ef4444;
+  --danger-bg: #fef1f2;
+  --danger-border: #fbcacd;
+  --danger-fg: #b91c1c;
+  --shadow-xs: 0 1px 2px rgba(23, 19, 31, 0.14);
+  --shadow-sm: 0 3px 10px rgba(23, 19, 31, 0.12);
+  --shadow-md: 0 10px 28px rgba(23, 19, 31, 0.14);
+  --glow: 0 0 0 1px rgba(124, 92, 252, 0.45), 0 8px 32px rgba(124, 92, 252, 0.3);
+}
+
+html {
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  text-rendering: optimizeLegibility;
+}
+
+body {
+  min-height: 100vh;
+  background: var(--bg);
+  font-family: "Inter", -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  color: var(--fg);
+  overflow-x: hidden;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+button,
+input,
+select,
+textarea {
+  font: inherit;
+}
+
+/* --------------------------------------------------------
+   Select / Option — ให้พื้นหลัง+สีตัวอักษรตัดกันชัดทั้งสองธีม
+   กันปัญหา dropdown สว่าง(ค่าเริ่ม browser) + ตัวอักษรสีสว่าง = อ่านไม่ออก
+   -------------------------------------------------------- */
+select {
+  background-color: var(--bg-subtle);
+  color: var(--fg-strong);
+  border-color: var(--border);
+}
+
+select option {
+  background-color: var(--bg-subtle);
+  color: var(--fg-strong);
+}
+
+/* ปุ่มกดมีเงา/hover/active ชัด ดูง่ายต่อการมองขึ้น (ไม่แตะเลย์เอาต์) */
+.vc-btn:active:not(:disabled) {
+  transform: translateY(1px);
+  box-shadow: var(--shadow-xs);
+}
+
+::selection {
+  background: #7c5cfc;
+  color: #ffffff;
+}
+
+/* Vendor styling for inputs (theme-aware) */
+input:-webkit-autofill,
+input:-webkit-autofill:hover,
+input:-webkit-autofill:focus {
+  -webkit-text-fill-color: var(--fg);
+  -webkit-box-shadow: 0 0 0 1000px var(--bg-subtle) inset;
+  transition: background-color 5000s ease-in-out 0s;
+}
+
+/* ---------------- Shared Frame.io Components ---------------- */
+
+.vc-card {
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  transition: border-color 0.15s ease, box-shadow 0.15s ease;
+}
+
+.vc-card-hover:hover {
+  border-color: var(--accent-soft-border);
+  box-shadow: var(--shadow-sm);
+}
+
+.vc-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--border);
+  background: var(--bg-card);
+  color: var(--fg);
+  font-weight: 600;
+  font-size: 13px;
+  cursor: pointer;
+  padding: 7px 14px;
+  transition: background 0.13s ease, border-color 0.13s ease, box-shadow 0.13s ease;
+}
+
+.vc-btn:hover {
+  background: var(--bg-hover);
+  border-color: var(--border-strong);
+}
+
+.vc-btn-primary {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: var(--accent-fg);
+}
+
+.vc-btn-primary:hover {
+  background: var(--accent-hover);
+  border-color: var(--accent-hover);
+  box-shadow: 0 4px 16px rgba(124, 92, 252, 0.35);
+}
+
+.vc-btn-white {
+  background: #ffffff;
+  border-color: #ffffff;
+  color: #0b0a10;
+}
+
+.vc-btn-white:hover {
+  background: #ededf2;
+  border-color: #ededf2;
+}
+
+.vc-input {
+  width: 100%;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--bg-card);
+  color: var(--fg);
+  font-size: 13.5px;
+  padding: 8px 12px;
+  outline: none;
+  transition: border-color 0.13s ease, box-shadow 0.13s ease;
+}
+
+.vc-input:focus {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px rgba(124, 92, 252, 0.18);
+}
+
+/* Glassmorphic search bar */
+.vc-glass {
+  background: var(--glass);
+  backdrop-filter: blur(14px);
+  -webkit-backdrop-filter: blur(14px);
+  border: 1px solid var(--border);
+}
+
+/* Header / Sub-Header แบบ Frosted — รองรับทั้ง Dark & Light
+   พื้นหลัง = สีธีมปัจจุบัน (var(--bg)) แบบโปร่งแสง + blur */
+.laf-page-header {
+  background: color-mix(in srgb, var(--bg) 80%, transparent);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+}
+
+.app-shell {
+  width: 100%;
+  min-height: 100vh;
+}
+
+.landing-card {
+  width: min(100%, 460px);
+}
+
+@media (max-width: 480px) {
+  .landing-card {
+    border-radius: 24px;
+  }
+}
+
+/* ---- Responsive: มือถือ ---- */
+@media (max-width: 768px) {
+  /* เว้นพื้นล่างสำหรับแถบเมนู BottomNav (fixed) ไม่ให้ทับเนื้อหา */
+  .laf-page-scroll {
+    padding-bottom: 84px !important;
+  }
+  /* ปุ่ม/องค์ประกอบแตะง่ายขึ้นบนมือถือ */
+  .vc-grid {
+    gap: 12px;
+  }
+}
+
+/* ---------------- Animations ---------------- */
+
+@keyframes lafPulse {
+  0%,
+  100% {
+    opacity: 1;
+    transform: scale(1);
+  }
+  50% {
+    opacity: 0.4;
+    transform: scale(0.8);
+  }
+}
+
+@keyframes lafGlowPulse {
+  0%,
+  100% {
+    opacity: 0.55;
+  }
+  50% {
+    opacity: 1;
+  }
+}
+
+@keyframes lafFadeInUp {
+  from {
+    opacity: 0;
+    transform: translateY(10px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes spin {
+  from {
+    transform: rotate(0deg);
+  }
+  to {
+    transform: rotate(360deg);
+  }
+}

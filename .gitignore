@@ -1,0 +1,40 @@
+# Logs
+logs
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+lerna-debug.log*
+devlog.txt
+
+node_modules
+dist
+dist-ssr
+*.local
+
+# Firebase
+.firebase/
+.firebaserc.local
+
+# Editor directories and files
+.vscode/*
+!.vscode/extensions.json
+.idea
+.DS_Store
+*.suo
+*.ntvs*
+*.njsproj
+*.sln
+*.sw?
+
+# Env files
+.env
+.env.*
+
+# Vercel
+.vercel
+
+# Firebase service account (ห้าม commit ขึ้น git โดยเด็ดขาด)
+firebase-admin-key.json
+firebase-admin-key.json.*
