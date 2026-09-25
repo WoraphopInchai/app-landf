@@ -485,11 +485,29 @@ export async function runAiMatchServer(args: {
     })
     .sort((a, b) => b.score - a.score);
 
-  const matches: AiMatchRecord[] = [];
-  const nearMatches: AiMatchRecord[] = [];
+  const matches = new Map<string, AiMatchRecord>();
+  const nearMatches = new Map<string, AiMatchRecord>();
   const validMatchIds = new Set<string>();
   const validNearIds = new Set<string>();
   const toMirror: Array<{ docId: string; data: Record<string, unknown> }> = [];
+
+  // เก็บแมท/ใกล้เคียงเดิมไว้ก่อน (เว้นคู่ที่ถูก reject/คู่กับตัวเอง) — rescan ใหม่
+  // ห้ามทำให้คู่ที่เคยแมทเจอแล้วหายไป: คู่ที่โดน jump ข้าม (settled/เพิ่ง judg แล้ว)
+  // จะได้ถูกเก็บไว้ในผลลัพธ์เหมือนเดิม
+  for (const m of existingMatches) {
+    if (m.rejected || m.matchedPostId === postId) continue;
+    matches.set(m.matchedPostId, m);
+    validMatchIds.add(m.matchedPostId);
+  }
+  for (const m of existingNear) {
+    if (m.rejected || m.matchedPostId === postId) continue;
+    nearMatches.set(m.matchedPostId, m);
+    validNearIds.add(m.matchedPostId);
+  }
+  for (const id of matches.keys()) {
+    nearMatches.delete(id);
+    validNearIds.delete(id);
+  }
 
   const softBlockedIds = new Set<string>();
   for (const r of ranked) {
@@ -544,8 +562,10 @@ export async function runAiMatchServer(args: {
         similarityScore: score,
         reason,
       };
-      matches.push(entry);
+      matches.set(docSnap.id, entry);
+      nearMatches.delete(docSnap.id);
       validMatchIds.add(docSnap.id);
+      validNearIds.delete(docSnap.id);
       const mirror = {
         matchedPostId: postId,
         matchedTitle: String(post.title || ""),
@@ -565,8 +585,10 @@ export async function runAiMatchServer(args: {
         similarityScore: score,
         reason,
       };
-      nearMatches.push(nearEntry);
+      nearMatches.set(docSnap.id, nearEntry);
+      matches.delete(docSnap.id);
       validNearIds.add(docSnap.id);
+      validMatchIds.delete(docSnap.id);
       const nearMirror = {
         matchedPostId: postId,
         matchedTitle: String(post.title || ""),
@@ -580,6 +602,10 @@ export async function runAiMatchServer(args: {
         data: { ...updated, aiJudgedAt: { ...((t.aiJudgedAt as Record<string, string>) || {}), [postId]: new Date(nowPair).toISOString() } },
       });
     } else {
+      matches.delete(docSnap.id);
+      nearMatches.delete(docSnap.id);
+      validMatchIds.delete(docSnap.id);
+      validNearIds.delete(docSnap.id);
       toMirror.push({
         docId: docSnap.id,
         data: { aiJudgedAt: { ...((t.aiJudgedAt as Record<string, string>) || {}), [postId]: new Date(nowPair).toISOString() } },
@@ -587,8 +613,12 @@ export async function runAiMatchServer(args: {
     }
   }
 
-  matches.sort((a, b) => b.similarityScore - a.similarityScore);
-  nearMatches.sort((a, b) => b.similarityScore - a.similarityScore);
+  const matchRows = Array.from(matches.values()).sort(
+    (a, b) => b.similarityScore - a.similarityScore
+  );
+  const nearMatchRows = Array.from(nearMatches.values()).sort(
+    (a, b) => b.similarityScore - a.similarityScore
+  );
 
   const interesting = !["under_investigation", "resolved", "suspended"].includes(String(post.status || ""));
 
@@ -638,8 +668,8 @@ export async function runAiMatchServer(args: {
 
   const payload: Record<string, unknown> = {
     aiData: storedAiData,
-    matches,
-    nearMatches,
+    matches: matchRows,
+    nearMatches: nearMatchRows,
     aiJudgedAt: judgedAt,
   };
   if (interesting) payload.aiCheckedAt = new Date().toISOString();
@@ -650,7 +680,13 @@ export async function runAiMatchServer(args: {
     console.error("[AI] self update error:", err);
   }
 
-  return { aiData: storedAiData, matches, nearMatches, usedCalls, budgetHit };
+  return {
+    aiData: storedAiData,
+    matches: matchRows,
+    nearMatches: nearMatchRows,
+    usedCalls,
+    budgetHit,
+  };
 }
 
 // ---------- เช็คว่าโพสต์ถึงเวลา rescan หรือยัง ----------
