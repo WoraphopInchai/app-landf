@@ -6,7 +6,7 @@ import { runAiMatchServer } from "./_lib/ai.js";
 export default handleRequest(async (req: VercelRequest, res: VercelResponse) => {
   const uid = await authUid(req);
 
-  const limiterRef = db().doc(`meta/forceScan/${uid}`);
+  const limiterRef = db().doc(`meta/forceScan/users/${uid}`);
   const limiterSnap = await limiterRef.get();
   const lastRun = Number(
     (limiterSnap.data() as { lastRunAtMs?: number } | undefined)?.lastRunAtMs || 0
