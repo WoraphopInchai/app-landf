@@ -11,8 +11,9 @@ function cronAuthorized(req: VercelRequest): boolean {
   return header === `Bearer ${secret}`;
 }
 
-// ผู้ใช้เปิดแอปแล้วเรียกกวาดเองได้ (โดยกว่าไม่ถี่เกิน 60 วินาที กันโควตา Gemini เหลือเกิน)
-const SWEEP_COOLDOWN_MS = 60_000;
+// ผู้ใช้เปิดแอปแล้วเรียกกวาดเองได้ (โดยกว่าไม่ถี่เกิน 15 นาที กันโควตา reads ของ Firestore แผนฟรี)
+// 15 นาที × 300 reads/รอบ ≈ 29,000 reads/วัน (จากเพดานฟรี 50,000)
+const SWEEP_COOLDOWN_MS = 15 * 60_000;
 
 async function acquireUserCooldown(): Promise<boolean> {
   const ref = db().collection("meta").doc("reconcileCooldown");
@@ -37,8 +38,16 @@ async function runMatchSweep(): Promise<{ postsDone: number; totalMatches: numbe
   const snap = await db()
     .collection("posts")
     .where("status", "in", ["active", "pending"])
+    .orderBy("createdAt", "desc")
     .limit(100)
     .get();
+
+  const checkedMs = (p: Record<string, unknown>): number => {
+    const v = p.aiCheckedAt as string | { toMillis?: () => number } | undefined;
+    if (!v) return 0;
+    if (typeof v === "string") return Date.parse(v) || 0;
+    return v.toMillis ? v.toMillis() : 0;
+  };
 
   const candidates = snap.docs
     .filter((d) => {
@@ -48,11 +57,8 @@ async function runMatchSweep(): Promise<{ postsDone: number; totalMatches: numbe
       if (s !== "active" && !(s === "pending" && it === "found")) return false;
       return needsScanServer(p);
     })
-    .sort(
-      (a, b) =>
-        Number(a.data().createdAt?.toMillis?.() || 0) -
-        Number(b.data().createdAt?.toMillis?.() || 0)
-    );
+    // ให้โพสต์ที่ยังไม่เคยตรวจได้ก่อน ถัดมาโพสต์ที่ตรวจนานที่สุด
+    .sort((a, b) => checkedMs(a.data()) - checkedMs(b.data()));
 
   let postsDone = 0;
   let totalMatches = 0;
@@ -156,8 +162,15 @@ export default handleRequest(async (req: VercelRequest, res: VercelResponse) => 
     }
     const allowed = await acquireUserCooldown();
     if (!allowed) {
-      return sendJson(res, 429, {
-        error: "กวาดคู่แนะนำเพิ่งถูกเรียกเมื่อไม่นานมานี้ ให้ลองใหม่อีกครั้งสักครู่",
+      // ไม่ใช่ error — เป็นงานที่เพิ่งถูกกวาดไปแล้วโดยคนอื่น
+      // (เดิมตอบ 429 ทำให้ client ที่เรียกแบบ fire-and-forget ตอนเปิดแอป
+      //  log error เต็มไปหมด และทำให้ผู้ใช้ที่เปิดแอปบ่อยเห็นอาการแปลก)
+      return ok(res, {
+        ok: true,
+        skipped: "recently_swept",
+        postsDone: 0,
+        totalMatches: 0,
+        expiredClaims: 0,
       });
     }
   }

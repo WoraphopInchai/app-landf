@@ -11,7 +11,7 @@ const ICONS = {
 
 const COLORS = {
   success: { bg: "#14261a", border: "#24543a", icon: "#4ade80", shadow: "rgba(74,222,128,0.25)" },
-  error:   { bg: "#2a1418", border: "#4a1f28", icon: "#f87171", shadow: "rgba(248,113,113,0.25)" },
+  error:   { bg: "var(--sc-danger-bg)", border: "var(--sc-danger-border)", icon: "var(--sc-danger-fg)", shadow: "rgba(248,113,113,0.25)" },
   info:    { bg: "#1a1a2e", border: "#2d2d5e", icon: "#7c5cfc", shadow: "rgba(124,92,252,0.25)" },
 } as const;
 

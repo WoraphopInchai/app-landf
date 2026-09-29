@@ -974,3 +974,72 @@ describe("Guest browsing — posts read (ไม่ต้องล็อกอิ
     await assertFails(q.get());
   });
 });
+
+// =====================================================================
+// AI match fields ต้องมาจาก server เท่านั้น (Admin SDK) — client สร้าง/แก้เองไม่ได้
+// เดิมกฎห้ามเฉพาะฝั่ง update เลยยัง "สร้างโพสต์พร้อม matches:[confirmed:true]"
+// แล้วปลอมการ์ด "ยืนยันแล้ว" ให้เจ้าของโพสต์ที่ถูกอ้างถึงได้
+// =====================================================================
+describe("AI match fields — client สร้าง/แก้เองไม่ได้", () => {
+  const legitLost = {
+    itemType: "lost",
+    status: "active",
+    title: "กุญแจหาย",
+    desc: "ทำหายที่ห้องสังคม",
+    category: "กุญแจ",
+    locationName: "อาคาร 3",
+    building: "อาคาร 3",
+    depositLocation: "",
+    userId: OWNER_UID,
+  };
+
+  it("สร้างโพสต์ปกติ (payload จริงของ ReportItem) → สำเร็จ", async () => {
+    const db = authAs(OWNER_UID).firestore();
+    await assertSucceeds(db.collection("posts").add({ ...legitLost }));
+  });
+
+  const aiFields: Array<[string, unknown]> = [
+    [
+      "matches",
+      [{ matchedPostId: "postA", matchedTitle: "x", similarityScore: 99, confirmed: true }],
+    ],
+    ["nearMatches", [{ matchedPostId: "postA", matchedTitle: "x", similarityScore: 50 }]],
+    ["aiData", { keywords: ["กระเป๋า"] }],
+    ["aiJudgedAt", { postA: "2026-01-01T00:00:00.000Z" }],
+    ["aiCheckedAt", "2026-01-01T00:00:00.000Z"],
+  ];
+
+  for (const [field, value] of aiFields) {
+    it(`สร้างโพสต์ที่แนบ ${field} → ถูกปฏิเสธ`, async () => {
+      const db = authAs(OWNER_UID).firestore();
+      await assertFails(db.collection("posts").add({ ...legitLost, [field]: value }));
+    });
+  }
+
+  const writeFields: Array<[string, unknown]> = [
+    ["aiJudgedAt", { postA: "2026-01-01T00:00:00.000Z" }],
+    ["aiCheckedAt", "2026-01-01T00:00:00.000Z"],
+    ["matches", [{ matchedPostId: "postA", matchedTitle: "x", similarityScore: 99 }]],
+    ["nearMatches", [{ matchedPostId: "postA", matchedTitle: "x", similarityScore: 50 }]],
+    ["aiData", { keywords: ["กระเป๋า"] }],
+  ];
+
+  for (const [field, value] of writeFields) {
+    it(`เจ้าของแก้ ${field} เอง → ถูกปฏิเสธ`, async () => {
+      const db = authAs(OWNER_UID).firestore();
+      await assertFails(db.collection("posts").doc("postLost").update({ [field]: value }));
+    });
+  }
+
+  it("เจ้าของย้ายโพสต์ไปเป็นของคนอื่น (แก้ userId) → ถูกปฏิเสธ", async () => {
+    const db = authAs(OWNER_UID).firestore();
+    await assertFails(db.collection("posts").doc("postLost").update({ userId: USER_B_UID }));
+  });
+
+  it("เจ้าของแก้ฟิลด์ปกติของตัวเองยังได้ (ไม่พังของเดิม)", async () => {
+    const db = authAs(OWNER_UID).firestore();
+    await assertSucceeds(
+      db.collection("posts").doc("postLost").update({ title: "กุญแจหาย (แก้ไข)" })
+    );
+  });
+});

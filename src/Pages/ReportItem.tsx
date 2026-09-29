@@ -390,7 +390,7 @@ export default function ReportItem({
                     background:
                       itemType === "lost"
                         ? "#7c5cfc"
-                        : "#2a1a10",
+                        : "var(--sc-warn-bg)",
                     display: "flex",
                     alignItems: "center",
                     justifyContent: "center",
@@ -398,7 +398,7 @@ export default function ReportItem({
                 >
                   <Search
                     size={22}
-                    color={itemType === "lost" ? "var(--accent-fg)" : "#fb923c"}
+                    color={itemType === "lost" ? "var(--accent-fg)" : "var(--sc-warn-fg)"}
                   />
                 </div>
                 <span
@@ -430,10 +430,10 @@ export default function ReportItem({
                   borderRadius: "14px",
                   border:
                     itemType === "found"
-                      ? "2px solid #34d399"
+                      ? "2px solid var(--sc-ok-fg)"
                       : "1.5px solid var(--border)",
                   backgroundColor:
-                    itemType === "found" ? "#0f2a1f" : "var(--bg-card)",
+                    itemType === "found" ? "var(--sc-ok-bg)" : "var(--bg-card)",
                   display: "flex",
                   flexDirection: "column",
                   alignItems: "center",
@@ -453,8 +453,8 @@ export default function ReportItem({
                     borderRadius: "13px",
                     background:
                       itemType === "found"
-                        ? "linear-gradient(135deg, #34d399, #10b981)"
-                        : "#0f2a1f",
+                        ? "linear-gradient(135deg, var(--sc-ok-fg), #10b981)"
+                        : "var(--sc-ok-bg)",
                     display: "flex",
                     alignItems: "center",
                     justifyContent: "center",
@@ -462,14 +462,14 @@ export default function ReportItem({
                 >
                   <Box
                     size={22}
-                    color={itemType === "found" ? "var(--accent-fg)" : "#34d399"}
+                    color={itemType === "found" ? "var(--accent-fg)" : "var(--sc-ok-fg)"}
                   />
                 </div>
                 <span
                   style={{
                     fontSize: "13px",
                     fontWeight: 700,
-                    color: itemType === "found" ? "#6ee7b7" : "var(--fg-secondary)",
+                    color: itemType === "found" ? "var(--sc-ok-fg-strong)" : "var(--fg-secondary)",
                   }}
                 >
                   พบของ
@@ -477,7 +477,7 @@ export default function ReportItem({
                 <span
                   style={{
                     fontSize: "10px",
-                    color: itemType === "found" ? "#34d399" : "var(--fg-faint)",
+                    color: itemType === "found" ? "var(--sc-ok-fg)" : "var(--fg-faint)",
                     fontWeight: 500,
                   }}
                 >
@@ -655,7 +655,7 @@ export default function ReportItem({
               >
                 <Tag size={14} color="var(--fg-accent)" />
                 <span>หมวดหมู่สิ่งของ</span>{" "}
-                <span style={{ color: "#f87171" }}>*</span>
+                <span style={{ color: "var(--sc-danger-fg)" }}>*</span>
               </label>
               <select
                 required
@@ -690,7 +690,7 @@ export default function ReportItem({
               <label
                 style={{ fontSize: "12px", fontWeight: 700, color: "var(--fg-secondary)" }}
               >
-                ชื่อสิ่งของ <span style={{ color: "#f87171" }}>*</span>
+                ชื่อสิ่งของ <span style={{ color: "var(--sc-danger-fg)" }}>*</span>
               </label>
               <input
                 type="text"
@@ -771,7 +771,7 @@ export default function ReportItem({
               <label
                 style={{ fontSize: "12px", fontWeight: 700, color: "var(--fg-secondary)" }}
               >
-                สถานที่ / ตึกเรียน <span style={{ color: "#f87171" }}>*</span>
+                สถานที่ / ตึกเรียน <span style={{ color: "var(--sc-danger-fg)" }}>*</span>
               </label>
               <div
                 onClick={() => setIsLocationOpen(!isLocationOpen)}
@@ -933,17 +933,17 @@ export default function ReportItem({
                   flexDirection: "column",
                   gap: "6px",
                   background:
-                    "linear-gradient(135deg, #0f2a1f, #12301f)",
+                    "linear-gradient(135deg, var(--sc-ok-bg), var(--sc-ok-bg))",
                   padding: "14px",
                   borderRadius: "14px",
-                  border: "1px solid #1f4a35",
+                  border: "1px solid var(--sc-ok-border)",
                 }}
               >
                 <label
                   style={{
                     fontSize: "12px",
                     fontWeight: 700,
-                    color: "#6ee7b7",
+                    color: "var(--sc-ok-fg-strong)",
                     display: "flex",
                     alignItems: "center",
                     gap: "6px",
@@ -955,7 +955,7 @@ export default function ReportItem({
                       height: "24px",
                       borderRadius: "7px",
                       background:
-                        "linear-gradient(135deg, #34d399, #10b981)",
+                        "linear-gradient(135deg, var(--sc-ok-fg), #10b981)",
                       display: "flex",
                       alignItems: "center",
                       justifyContent: "center",
@@ -966,14 +966,14 @@ export default function ReportItem({
                   <span>
                     จุดฝากสิ่งของที่นำส่ง (ป้อมยาม/กองกิจการนิสิต)
                   </span>{" "}
-                  <span style={{ color: "#f87171" }}>*</span>
+                  <span style={{ color: "var(--sc-danger-fg)" }}>*</span>
                 </label>
                 <select
                   required={itemType === "found"}
                   value={depositLocation}
                   onChange={(e) => setDepositLocation(e.target.value)}
                   style={{
-                    border: "1px solid #1f4a35",
+                    border: "1px solid var(--sc-ok-border)",
                     borderRadius: "10px",
                     padding: "11px 14px",
                     fontSize: "13px",
@@ -1009,11 +1009,11 @@ export default function ReportItem({
                     marginTop: "10px",
                     padding: "10px 12px",
                     borderRadius: "10px",
-                    background: "#2a1a10",
-                    border: "1px solid #4a3418",
+                    background: "var(--sc-warn-bg)",
+                    border: "1px solid var(--sc-warn-border)",
                     fontSize: "12.5px",
                     lineHeight: 1.55,
-                    color: "#fbbf24",
+                    color: "var(--sc-warn-fg)",
                   }}
                 >
                   <div style={{ flexShrink: 0, marginTop: 1 }}>
@@ -1105,7 +1105,7 @@ export default function ReportItem({
           <div
             style={{
               background: "var(--card-bg, #1a1410)",
-              border: "1px solid #1f4a35",
+              border: "1px solid var(--sc-ok-border)",
               borderRadius: "18px",
               padding: "20px",
               width: "100%",
@@ -1119,13 +1119,13 @@ export default function ReportItem({
                 width: 44,
                 height: 44,
                 borderRadius: "12px",
-                background: "#0f2a1f",
-                border: "1px solid #1f4a35",
+                background: "var(--sc-ok-bg)",
+                border: "1px solid var(--sc-ok-border)",
                 display: "flex",
                 alignItems: "center",
                 justifyContent: "center",
                 marginBottom: "12px",
-                color: "#34d399",
+                color: "var(--sc-ok-fg)",
               }}
             >
               <Box size={22} />
@@ -1154,9 +1154,9 @@ export default function ReportItem({
                     width: 22,
                     height: 22,
                     borderRadius: "50%",
-                    background: "#0f2a1f",
-                    border: "1px solid #1f4a35",
-                    color: "#34d399",
+                    background: "var(--sc-ok-bg)",
+                    border: "1px solid var(--sc-ok-border)",
+                    color: "var(--sc-ok-fg)",
                     fontSize: "12px",
                     fontWeight: 800,
                     display: "flex",
@@ -1168,7 +1168,7 @@ export default function ReportItem({
                   1
                 </div>
                 <div style={{ fontSize: "13px", lineHeight: 1.5, color: "var(--fg-secondary, #aaa)" }}>
-                  เลือก<span style={{ fontWeight: 800, color: "#34d399" }}>จุดรับฝาก</span>ในฟอร์ม
+                  เลือก<span style={{ fontWeight: 800, color: "var(--sc-ok-fg)" }}>จุดรับฝาก</span>ในฟอร์ม
                   (ป้อมยาม / กองกิจการนิสิต)
                 </div>
               </div>
@@ -1178,9 +1178,9 @@ export default function ReportItem({
                     width: 22,
                     height: 22,
                     borderRadius: "50%",
-                    background: "#0f2a1f",
-                    border: "1px solid #1f4a35",
-                    color: "#34d399",
+                    background: "var(--sc-ok-bg)",
+                    border: "1px solid var(--sc-ok-border)",
+                    color: "var(--sc-ok-fg)",
                     fontSize: "12px",
                     fontWeight: 800,
                     display: "flex",
@@ -1201,9 +1201,9 @@ export default function ReportItem({
                     width: 22,
                     height: 22,
                     borderRadius: "50%",
-                    background: "#0f2a1f",
-                    border: "1px solid #1f4a35",
-                    color: "#34d399",
+                    background: "var(--sc-ok-bg)",
+                    border: "1px solid var(--sc-ok-border)",
+                    color: "var(--sc-ok-fg)",
                     fontSize: "12px",
                     fontWeight: 800,
                     display: "flex",
@@ -1215,7 +1215,7 @@ export default function ReportItem({
                   3
                 </div>
                 <div style={{ fontSize: "13px", lineHeight: 1.5, color: "var(--fg-secondary, #aaa)" }}>
-                  แอดมิน<span style={{ fontWeight: 800, color: "#34d399" }}>ตรวจรับของ</span>
+                  แอดมิน<span style={{ fontWeight: 800, color: "var(--sc-ok-fg)" }}>ตรวจรับของ</span>
                   แล้วจึงอนุมัติให้โพสต์ขึ้นระบบ
                 </div>
               </div>
@@ -1224,11 +1224,11 @@ export default function ReportItem({
               style={{
                 padding: "10px 12px",
                 borderRadius: "10px",
-                background: "#1c1626",
-                border: "1px solid #3a2f52",
+                background: "var(--sc-brand-bg)",
+                border: "1px solid var(--sc-brand-border)",
                 fontSize: "12px",
                 lineHeight: 1.5,
-                color: "#a78bfa",
+                color: "var(--sc-brand-fg)",
                 marginBottom: "16px",
               }}
             >
@@ -1274,7 +1274,7 @@ export default function ReportItem({
           <div
             style={{
               background: "var(--card-bg, #1a1410)",
-              border: "1px solid #4a3418",
+              border: "1px solid var(--sc-warn-border)",
               borderRadius: "18px",
               padding: "20px",
               width: "100%",
@@ -1288,13 +1288,13 @@ export default function ReportItem({
                 width: 44,
                 height: 44,
                 borderRadius: "12px",
-                background: "#2a1a10",
-                border: "1px solid #4a3418",
+                background: "var(--sc-warn-bg)",
+                border: "1px solid var(--sc-warn-border)",
                 display: "flex",
                 alignItems: "center",
                 justifyContent: "center",
                 marginBottom: "12px",
-                color: "#fbbf24",
+                color: "var(--sc-warn-fg)",
               }}
             >
               <Box size={22} />
@@ -1325,9 +1325,9 @@ export default function ReportItem({
                 margin: "10px 0",
                 padding: "10px 12px",
                 borderRadius: "10px",
-                background: "#2a1a10",
-                border: "1px solid #4a3418",
-                color: "#fbbf24",
+                background: "var(--sc-warn-bg)",
+                border: "1px solid var(--sc-warn-border)",
+                color: "var(--sc-warn-fg)",
                 fontSize: "13px",
                 fontWeight: 800,
               }}

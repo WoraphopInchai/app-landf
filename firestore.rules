@@ -302,6 +302,15 @@ service cloud.firestore {
          (request.resource.data.itemType == 'found' && request.resource.data.status == 'pending'));
     }
 
+    // ผลแมท AI ต้องมาจาก server เท่านั้น (Admin SDK) ไม่ใช่ client
+    // ถ้าไม่กันตอน create ผู้ใช้จะสร้าง matches/nearMatches ปลอมพร้อมกดยืนยัน
+    // แล้วหน้าแรกของเจ้าของโพสต์ที่ถูกอ้างจะขึ้นการ์ด "ยืนยันแล้ว" ทั้งที่ไม่เคยกดอะไร
+    function noClientAiMatchFields() {
+      return !request.resource.data.diff({}).affectedKeys().hasAny([
+        'matches', 'nearMatches', 'aiData', 'aiJudgedAt', 'aiCheckedAt'
+      ]);
+    }
+
     match /posts/{postId} {
       // แอดมินหัวหน้า: อ่านทุกโพสต์
       // เจ้าหน้าที่ประจำจุด: อ่านเฉพาะโพสต์ที่จุดตัวเอง (กันรู้ข้อมูลจุดอื่น)
@@ -318,10 +327,12 @@ service cloud.firestore {
         ));
       allow create: if isLoggedIn() &&
         !isBanned(request.auth.uid) &&
-        canCreatePostExisting();
+        canCreatePostExisting() &&
+        noClientAiMatchFields();
       // หัวหน้าแอดมิน: แก้โพสต์ใดก็ได้
       // เจ้าหน้าที่: อนุมัติ/ปฏิเสธโพสต์ของพบที่จุดตัวเองเท่านั้น (ดู canStaffApproveFoundPost)
-      // เจ้าของ: แก้โพสต์ได้แต่ห้ามเปลี่ยน status (กัน self-approve) — จอง/เขียนผล AI ได้ตามปกติ
+      // เจ้าของ: แก้โพสต์ได้แต่ห้ามเปลี่ยน status (กัน self-approve) และห้ามเขียน
+      // ฟิลด์ผลแมท AI เองทุกชนิด (เขียนได้ฝั่ง server Admin SDK เท่านั้น) + userId ต้องตรงเดิม
       allow update: if isLoggedIn() && (
         isSuperAdmin(request.auth.uid) ||
         canStaffApproveFoundPost() ||
@@ -329,9 +340,12 @@ service cloud.firestore {
         canReserve(postId) ||
         (!isBanned(request.auth.uid) &&
           request.auth.uid == resource.data.userId &&
-          !request.resource.data.diff(resource.data).affectedKeys().hasAny(['matches', 'aiData', 'nearMatches']) &&
+          !request.resource.data.diff(resource.data).affectedKeys().hasAny([
+            'matches', 'nearMatches', 'aiData', 'aiJudgedAt', 'aiCheckedAt'
+          ]) &&
           request.resource.data.status == resource.data.status &&
           request.resource.data.itemType == resource.data.itemType &&
+          request.resource.data.userId == resource.data.userId &&
           request.resource.data.depositLocation == resource.data.depositLocation)
       );
       allow delete: if isLoggedIn() && (

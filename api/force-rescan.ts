@@ -12,11 +12,11 @@ export default handleRequest(async (req: VercelRequest, res: VercelResponse) => 
     (limiterSnap.data() as { lastRunAtMs?: number } | undefined)?.lastRunAtMs || 0
   );
   const now = Date.now();
-  if (now - lastRun < 60_000) {
-    throw new ApiHttpError(429, "กรุณารอ 1 นาทีก่อนกดอีกครั้ง");
+  if (now - lastRun < 10 * 60_000) {
+    throw new ApiHttpError(429, "กรุณารอ 10 นาทีก่อนกดอีกครั้ง");
   }
 
-  const snap = await db().collection("posts").where("userId", "==", uid).limit(50).get();
+  const snap = await db().collection("posts").where("userId", "==", uid).limit(20).get();
   const targets = snap.docs.filter((d) => {
     const s = String(d.data().status || "active");
     const it = String(d.data().itemType || d.data().type || "");
@@ -25,12 +25,14 @@ export default handleRequest(async (req: VercelRequest, res: VercelResponse) => 
 
   let postsDone = 0;
   let totalMatches = 0;
+  let totalNear = 0;
   for (const d of targets) {
     const r = await runAiMatchServer({ db: db(), postId: d.id, extractOwnerUid: uid });
     postsDone++;
     totalMatches += r.matches.length;
+    totalNear += r.nearMatches.length;
   }
 
   await limiterRef.set({ lastRunAtMs: now });
-  return ok(res, { postsDone, totalMatches });
+  return ok(res, { postsDone, totalMatches, totalNear });
 });

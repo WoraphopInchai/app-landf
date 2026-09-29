@@ -303,20 +303,19 @@ export default function MyItems({
     setScanTotal(candidates.length);
     setScanDone(0);
     try {
-      const { postsDone, totalMatches } = await runForceRescan();
+      const { postsDone, totalMatches, totalNear } = await runForceRescan();
       setScanDone(postsDone);
-      if (candidates.length === 0 && totalMatches === 0) {
+      if (postsDone === 0) {
         showToast(
-          "ไม่มีโพสต์ของตัวเองให้สแกน — ลองล็อกอินบัญชีที่มีโพสต์",
+          "ไม่มีโพสต์ของตัวเองที่รอสแกน (โพสต์ที่ยัง active หรือรอแอดมินอนุมัติเท่านั้น)",
           "info"
         );
-      } else if (totalMatches > 0) {
-        showToast(
-          `สแกนเสร็จ: ${postsDone} โพสต์ · พบคู่แนะนำ ${totalMatches} คู่`,
-          "success"
-        );
       } else {
-        showToast(`สแกนเสร็จ: ${postsDone} โพสต์ · ยังไม่พบคู่ใหม่`, "info");
+        const parts = [`${postsDone} โพสต์`];
+        parts.push(`คู่แมท ${totalMatches} คู่`);
+        if (totalNear > 0) parts.push(`ใกล้เคียง ${totalNear} คู่`);
+        const tone = totalMatches > 0 ? "success" : "info";
+        showToast(`สแกนเสร็จ: ${parts.join(" · ")}`, tone);
       }
     } catch (err) {
       console.error("Force refresh AI error:", err);
@@ -379,31 +378,31 @@ export default function MyItems({
 
   const getStatusInfo = (item: PostDoc) => {
     if (item.status === "resolved")
-      return { label: "พบเจ้าของแล้ว", color: "#34d399", bg: "#0f2a1f", border: "#1f4a35" };
+      return { label: "พบเจ้าของแล้ว", color: "var(--sc-ok-fg)", bg: "var(--sc-ok-bg)", border: "var(--sc-ok-border)" };
     if (item.status === "under_investigation")
-      return { label: "อยู่ระหว่างตรวจสอบ", color: "#f87171", bg: "#2a1418", border: "#4a1f28" };
+      return { label: "อยู่ระหว่างตรวจสอบ", color: "var(--sc-danger-fg)", bg: "var(--sc-danger-bg)", border: "var(--sc-danger-border)" };
     if (item.status === "in_progress")
-      return { label: "กำลังดำเนินการ", color: "#60a5fa", bg: "#172036", border: "#1e3a5f" };
+      return { label: "กำลังดำเนินการ", color: "var(--sc-info-fg)", bg: "var(--sc-info-bg)", border: "var(--sc-info-border)" };
     if (item.status === "pending")
-      return { label: "รออนุมัติ", color: "#fbbf24", bg: "#2a1a10", border: "#4a3418" };
+      return { label: "รออนุมัติ", color: "var(--sc-warn-fg)", bg: "var(--sc-warn-bg)", border: "var(--sc-warn-border)" };
     if (item.status === "rejected")
-      return { label: "ถูกปฏิเสธ", color: "#f87171", bg: "#2a1418", border: "#4a1f28" };
+      return { label: "ถูกปฏิเสธ", color: "var(--sc-danger-fg)", bg: "var(--sc-danger-bg)", border: "var(--sc-danger-border)" };
     if (item.itemType === "found")
-      return { label: "ของพบ", color: "#34d399", bg: "#0f2a1f", border: "#1f4a35" };
-    return { label: "ของหาย", color: "#fb923c", bg: "#2a1a10", border: "#4a3418" };
+      return { label: "ของพบ", color: "var(--sc-ok-fg)", bg: "var(--sc-ok-bg)", border: "var(--sc-ok-border)" };
+    return { label: "ของหาย", color: "var(--sc-warn-fg)", bg: "var(--sc-warn-bg)", border: "var(--sc-warn-border)" };
   };
 
   // สถานะคำขอรับของของเรา (ตามสถานะล่าสุดของ claim ที่ยื่นไป)
   const getClaimStatus = (claim: ClaimDoc) => {
     if (claim.status === "approved")
-      return { label: "คำขออนุมัติแล้ว", color: "#34d399", bg: "#0f2a1f", border: "#1f4a35" };
+      return { label: "คำขออนุมัติแล้ว", color: "var(--sc-ok-fg)", bg: "var(--sc-ok-bg)", border: "var(--sc-ok-border)" };
     if (claim.status === "rejected")
-      return { label: "คำขอถูกปฏิเสธ", color: "#f87171", bg: "#2a1418", border: "#4a1f28" };
+      return { label: "คำขอถูกปฏิเสธ", color: "var(--sc-danger-fg)", bg: "var(--sc-danger-bg)", border: "var(--sc-danger-border)" };
     if (claim.status === "expired")
-      return { label: "คำขอหมดอายุแล้ว", color: "#fbbf24", bg: "#2a1a10", border: "#4a3418" };
+      return { label: "คำขอหมดอายุแล้ว", color: "var(--sc-warn-fg)", bg: "var(--sc-warn-bg)", border: "var(--sc-warn-border)" };
     if (claim.status === "post_deleted")
-      return { label: "โพสต์ถูกลบ", color: "#9ca3af", bg: "#1c1a24", border: "#3a3350" };
-    return { label: "กำลังดำเนินการ", color: "#60a5fa", bg: "#172036", border: "#1e3a5f" };
+      return { label: "โพสต์ถูกลบ", color: "var(--sc-muted-fg)", bg: "var(--sc-muted-bg)", border: "var(--sc-muted-border)" };
+    return { label: "กำลังดำเนินการ", color: "var(--sc-info-fg)", bg: "var(--sc-info-bg)", border: "var(--sc-info-border)" };
   };
 
   // สถานะคำขอล่าสุดของแต่ละโพสต์ที่เราไปขอดรับของ
@@ -626,10 +625,10 @@ export default function MyItems({
               alignItems: "center",
               gap: "4px",
               padding: "8px 12px",
-              border: "1px solid #4a1f28",
+              border: "1px solid var(--sc-danger-border)",
               borderRadius: "10px",
-              backgroundColor: "#2a1418",
-              color: "#f87171",
+              backgroundColor: "var(--sc-danger-bg)",
+              color: "var(--sc-danger-fg)",
               fontSize: "12px",
               fontWeight: 700,
               cursor: "pointer",
@@ -823,15 +822,15 @@ export default function MyItems({
                 <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
                   {externalConfirmedMatches.length > 0 ? (
                     <>
-                      <CheckCircle2 size={13} color="#34d399" />
-                      <span style={{ fontSize: 12.5, fontWeight: 800, color: "#34d399" }}>
+                      <CheckCircle2 size={13} color="var(--sc-ok-fg)" />
+                      <span style={{ fontSize: 12.5, fontWeight: 800, color: "var(--sc-ok-fg)" }}>
                         แมทจริง · ยืนยันแล้ว ({externalConfirmedMatches.length})
                       </span>
                     </>
                   ) : (
                     <>
-                      <Sparkles size={13} color="#fbbf24" />
-                      <span style={{ fontSize: 12.5, fontWeight: 800, color: "#fbbf24" }}>
+                      <Sparkles size={13} color="var(--sc-warn-fg)" />
+                      <span style={{ fontSize: 12.5, fontWeight: 800, color: "var(--sc-warn-fg)" }}>
                         คู่ที่ AI แนะนำ — รอยืนยัน ({externalSuggestedMatches.length})
                       </span>
                     </>
@@ -839,9 +838,9 @@ export default function MyItems({
                 </div>
                 {(externalConfirmedMatches.length > 0 && externalSuggestedMatches.length > 0) && (
                   <div style={{ fontSize: 10.5, fontWeight: 600, color: "var(--fg-faint)" }}>
-                    <span style={{ color: "#34d399" }}>{externalConfirmedMatches.length} แมทจริง</span>
+                    <span style={{ color: "var(--sc-ok-fg)" }}>{externalConfirmedMatches.length} แมทจริง</span>
                     {" · "}
-                    <span style={{ color: "#fbbf24" }}>{externalSuggestedMatches.length} คู่ที่แนะนำ</span>
+                    <span style={{ color: "var(--sc-warn-fg)" }}>{externalSuggestedMatches.length} คู่ที่แนะนำ</span>
                     {" — คู่ที่ยืนยันแล้วเท่านั้นถือเป็นแมทจริง"}
                   </div>
                 )}
@@ -922,7 +921,7 @@ export default function MyItems({
                                 ? "rgba(52,211,153,0.2)"
                                 : "rgba(251,191,36,0.2)",
                               backdropFilter: "blur(6px)",
-                              color: isHigh ? "#34d399" : "#fbbf24",
+                              color: isHigh ? "var(--sc-ok-fg)" : "var(--sc-warn-fg)",
                               border: isHigh
                                 ? "1px solid rgba(52,211,153,0.5)"
                                 : "1px solid rgba(251,191,36,0.5)",
@@ -980,7 +979,7 @@ export default function MyItems({
                               background: isHigh
                                 ? "rgba(52,211,153,0.2)"
                                 : "rgba(251,191,36,0.2)",
-                              color: isHigh ? "#34d399" : "#fbbf24",
+                              color: isHigh ? "var(--sc-ok-fg)" : "var(--sc-warn-fg)",
                               border: isHigh
                                 ? "1px solid rgba(52,211,153,0.5)"
                                 : "1px solid rgba(251,191,36,0.5)",
@@ -1187,7 +1186,7 @@ export default function MyItems({
                   margin: "6px 0 10px",
                 }}
               >
-                <Sparkles size={14} color="#fbbf24" />
+                <Sparkles size={14} color="var(--sc-warn-fg)" />
                 <div style={{ fontSize: 13, fontWeight: 800, color: "var(--fg)" }}>
                   คู่ที่ AI แนะนำ — รอยืนยัน
                   <span style={{ color: "var(--fg-muted)", fontWeight: 500 }}>
@@ -1271,7 +1270,7 @@ export default function MyItems({
                               gap: 3,
                               background: "rgba(251,191,36,0.2)",
                               backdropFilter: "blur(6px)",
-                              color: "#fbbf24",
+                              color: "var(--sc-warn-fg)",
                               border: "1px solid rgba(251,191,36,0.5)",
                               padding: "2px 8px",
                               borderRadius: 999,
@@ -1325,7 +1324,7 @@ export default function MyItems({
                               alignItems: "center",
                               gap: 3,
                               background: "rgba(251,191,36,0.2)",
-                              color: "#fbbf24",
+                              color: "var(--sc-warn-fg)",
                               border: "1px solid rgba(251,191,36,0.5)",
                               padding: "2px 8px",
                               borderRadius: 999,
@@ -1512,7 +1511,7 @@ export default function MyItems({
                               borderRadius: 7,
                               border: "1px solid rgba(52,211,153,0.5)",
                               background: "rgba(52,211,153,0.14)",
-                              color: "#34d399",
+                              color: "var(--sc-ok-fg)",
                               fontSize: 10.5,
                               fontWeight: 800,
                               cursor: busy ? "wait" : "pointer",
@@ -1537,7 +1536,7 @@ export default function MyItems({
                               borderRadius: 7,
                               border: "1px solid rgba(244,63,94,0.5)",
                               background: "rgba(244,63,94,0.10)",
-                              color: "#f87171",
+                              color: "var(--sc-danger-fg)",
                               fontSize: 10.5,
                               fontWeight: 800,
                               cursor: busy ? "wait" : "pointer",
@@ -1563,7 +1562,7 @@ export default function MyItems({
                     margin: "18px 0 10px",
                   }}
                 >
-                  <Sparkles size={14} color="#fbbf24" />
+                  <Sparkles size={14} color="var(--sc-warn-fg)" />
                   <div style={{ fontSize: 13, fontWeight: 800, color: "var(--fg)" }}>
                     AI ใกล้เคียง — ยังไม่ยืนยัน
                     <span style={{ color: "var(--fg-muted)", fontWeight: 500 }}>
@@ -1646,7 +1645,7 @@ export default function MyItems({
                                   gap: 3,
                                   background: "rgba(251,191,36,0.2)",
                                   backdropFilter: "blur(6px)",
-                                  color: "#fbbf24",
+                                  color: "var(--sc-warn-fg)",
                                   border: "1px solid rgba(251,191,36,0.5)",
                                   padding: "2px 8px",
                                   borderRadius: 999,
@@ -1700,7 +1699,7 @@ export default function MyItems({
                                   alignItems: "center",
                                   gap: 3,
                                   background: "rgba(251,191,36,0.2)",
-                                  color: "#fbbf24",
+                                  color: "var(--sc-warn-fg)",
                                   border: "1px solid rgba(251,191,36,0.5)",
                                   padding: "2px 8px",
                                   borderRadius: 999,
@@ -1737,7 +1736,7 @@ export default function MyItems({
                               gap: 5,
                               fontSize: 11.5,
                               fontWeight: 600,
-                              color: "#fbbf24",
+                              color: "var(--sc-warn-fg)",
                             }}
                           >
                             ตรงกับโพสต์ของคุณ: {em.matchedMyPostTitle}
@@ -1862,7 +1861,7 @@ export default function MyItems({
                                   fontSize: 9,
                                   fontWeight: 800,
                                   letterSpacing: "0.4px",
-                                  color: em.confirmed ? "#34d399" : "#fbbf24",
+                                  color: em.confirmed ? "var(--sc-ok-fg)" : "var(--sc-warn-fg)",
                                   background: em.confirmed
                                     ? "rgba(52,211,153,0.14)"
                                     : "rgba(251,191,36,0.12)",
@@ -1901,7 +1900,7 @@ export default function MyItems({
                                       borderRadius: 6,
                                       border: "1px solid rgba(52,211,153,0.5)",
                                       background: "rgba(52,211,153,0.14)",
-                                      color: "#34d399",
+                                      color: "var(--sc-ok-fg)",
                                       fontSize: 10,
                                       fontWeight: 800,
                                       cursor: "pointer",
@@ -1929,7 +1928,7 @@ export default function MyItems({
                                       borderRadius: 6,
                                       border: "1px solid rgba(244,63,94,0.5)",
                                       background: "rgba(244,63,94,0.10)",
-                                      color: "#f87171",
+                                      color: "var(--sc-danger-fg)",
                                       fontSize: 10,
                                       fontWeight: 800,
                                       cursor: "pointer",
@@ -2150,7 +2149,7 @@ export default function MyItems({
                     gap: 3,
                     background: "rgba(11,10,16,0.72)",
                     backdropFilter: "blur(6px)",
-                    color: "#c4b5fd",
+                    color: "var(--sc-brand-fg)",
                     border: "1px solid #4a3fae",
                     padding: "2px 8px",
                     borderRadius: 999,
@@ -2233,8 +2232,8 @@ export default function MyItems({
 
                     {item.status === "pending" && !myClaim && (
                       <div style={{
-                        fontSize: 11, fontWeight: 700, color: "#fbbf24", lineHeight: 1.4,
-                        background: "#2a1a10", border: "1px solid #4a3418",
+                        fontSize: 11, fontWeight: 700, color: "var(--sc-warn-fg)", lineHeight: 1.4,
+                        background: "var(--sc-warn-bg)", border: "1px solid var(--sc-warn-border)",
                         padding: "6px 10px", borderRadius: 8,
                       }}>
                         นำของไปฝากที่จุดรับ ({item.depositLocation || item.locationName || "จุดที่แจ้งไว้"}) เพื่อให้แอดมินตรวจรับของ แล้วโพสต์จะถูกอนุมัติ
@@ -2242,8 +2241,8 @@ export default function MyItems({
                     )}
                     {item.status === "rejected" && !myClaim && (
                       <div style={{
-                        fontSize: 11, fontWeight: 700, color: "#f87171", lineHeight: 1.4,
-                        background: "#2a1418", border: "1px solid #4a1f28",
+                        fontSize: 11, fontWeight: 700, color: "var(--sc-danger-fg)", lineHeight: 1.4,
+                        background: "var(--sc-danger-bg)", border: "1px solid var(--sc-danger-border)",
                         padding: "6px 10px", borderRadius: 8,
                       }}>
                         คำขอโพสต์ถูกปฏิเสธ — ตรวจสอบจุดฝากของกับแอดมิน แล้วลบโพสต์นี้เพื่อส่งใหม่
@@ -2369,7 +2368,7 @@ export default function MyItems({
                             <>
                               <ClipboardCheck
                                 size={13}
-                                color="#fbbf24"
+                                color="var(--sc-warn-fg)"
                                 style={{ flexShrink: 0 }}
                               />
                               <span

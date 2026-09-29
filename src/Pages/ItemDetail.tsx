@@ -693,14 +693,14 @@ export default function ItemDetail({ item: initialItem, onBack, currentUser, onS
     || "ไม่ระบุสถานที่";
 
   const getStatusConfig = () => {
-    if (isSuspended) return { label: "ถูกระงับชั่วคราว", bg: "#fef2f2", border: "#fca5a5", color: "#dc2626", icon: <ShieldAlert size={16} /> };
-    if (isInvestigating) return { label: "อยู่ระหว่างการอายัด", bg: "#fef2f2", border: "#fca5a5", color: "#dc2626", icon: <ShieldAlert size={16} /> };
-    if (isPending) return { label: "รอแอดมินตรวจรับของ", bg: "#fffbeb", border: "#fcd34d", color: "#b45309", icon: <Clock size={16} /> };
-    if (isRejected) return { label: "คำขอถูกปฏิเสธ", bg: "#fef2f2", border: "#fca5a5", color: "#dc2626", icon: <ShieldAlert size={16} /> };
-    if (isResolved) return { label: "คืนเรียบร้อยแล้ว", bg: "#f0fdf4", border: "#86efac", color: "#16a34a", icon: <CheckCircle2 size={16} /> };
-    if (isInProgress) return { label: "กำลังดำเนินการ", bg: "#eff6ff", border: "#bfdbfe", color: "#2563eb", icon: <Navigation size={16} /> };
-    if (isLost) return { label: "ตามหาอยู่", bg: "#fffbeb", border: "#fde68a", color: "#d97706", icon: <AlertTriangle size={16} /> };
-    return { label: "พบแล้ว", bg: "#ecfdf5", border: "#a7f3d0", color: "#059669", icon: <PackageCheck size={16} /> };
+    if (isSuspended) return { label: "ถูกระงับชั่วคราว", bg: "var(--sc-danger-bg)", border: "var(--sc-danger-border)", color: "var(--sc-danger-fg)", icon: <ShieldAlert size={16} /> };
+    if (isInvestigating) return { label: "อยู่ระหว่างการอายัด", bg: "var(--sc-danger-bg)", border: "var(--sc-danger-border)", color: "var(--sc-danger-fg)", icon: <ShieldAlert size={16} /> };
+    if (isPending) return { label: "รอแอดมินตรวจรับของ", bg: "var(--sc-warn-bg)", border: "var(--sc-warn-border)", color: "var(--sc-warn-fg)", icon: <Clock size={16} /> };
+    if (isRejected) return { label: "คำขอถูกปฏิเสธ", bg: "var(--sc-danger-bg)", border: "var(--sc-danger-border)", color: "var(--sc-danger-fg)", icon: <ShieldAlert size={16} /> };
+    if (isResolved) return { label: "คืนเรียบร้อยแล้ว", bg: "var(--sc-ok-bg)", border: "var(--sc-ok-border)", color: "var(--sc-ok-fg)", icon: <CheckCircle2 size={16} /> };
+    if (isInProgress) return { label: "กำลังดำเนินการ", bg: "var(--sc-info-bg)", border: "var(--sc-info-border)", color: "var(--sc-info-fg)", icon: <Navigation size={16} /> };
+    if (isLost) return { label: "ตามหาอยู่", bg: "var(--sc-warn-bg)", border: "var(--sc-warn-border)", color: "var(--sc-warn-fg)", icon: <AlertTriangle size={16} /> };
+    return { label: "พบแล้ว", bg: "var(--sc-ok-bg)", border: "var(--sc-ok-border)", color: "var(--sc-ok-fg)", icon: <PackageCheck size={16} /> };
   };
 
   const statusCfg = getStatusConfig();
@@ -891,11 +891,11 @@ export default function ItemDetail({ item: initialItem, onBack, currentUser, onS
         {/* Status Banners */}
         {isInProgress && (
           <div className="detail-card" style={{
-            backgroundColor: "#141c30", border: "1px solid #2a3a5c", borderRadius: "14px",
+            backgroundColor: "var(--sc-info-bg)", border: "1px solid var(--sc-info-border)", borderRadius: "14px",
             padding: "13px 14px", marginBottom: "12px", display: "flex", gap: "10px", alignItems: "flex-start",
           }}>
-            <Navigation size={18} color="#60a5fa" style={{ flexShrink: 0, marginTop: "1px" }} />
-            <div style={{ fontSize: "12px", color: "#a3c2f7", lineHeight: "1.6" }}>
+            <Navigation size={18} color="var(--sc-info-fg)" style={{ flexShrink: 0, marginTop: "1px" }} />
+            <div style={{ fontSize: "12px", color: "var(--sc-info-fg)", lineHeight: "1.6" }}>
               <strong>กำลังดำเนินการ:</strong> มีผู้แจ้งว่าเป็นเจ้าของและกำลังเดินทางไปรับของชิ้นนี้ที่จุดรับของ
             </div>
           </div>
@@ -903,11 +903,11 @@ export default function ItemDetail({ item: initialItem, onBack, currentUser, onS
 
         {isInvestigating && (
           <div className="detail-card" style={{
-            backgroundColor: "#2a1418", border: "1px solid #4a1f28", borderRadius: "14px",
+            backgroundColor: "var(--sc-danger-bg)", border: "1px solid var(--sc-danger-border)", borderRadius: "14px",
             padding: "13px 14px", marginBottom: "12px", display: "flex", gap: "10px", alignItems: "flex-start",
           }}>
-            <ShieldAlert size={18} color="#f87171" style={{ flexShrink: 0, marginTop: "1px" }} />
-            <div style={{ fontSize: "12px", color: "#fca5a5", lineHeight: "1.6" }}>
+            <ShieldAlert size={18} color="var(--sc-danger-fg)" style={{ flexShrink: 0, marginTop: "1px" }} />
+            <div style={{ fontSize: "12px", color: "var(--sc-danger-fg-strong)", lineHeight: "1.6" }}>
               <strong>เคสนี้ถูกอายัดชั่วคราว:</strong> เนื่องจากมีการแจ้งสวมสิทธิ์หรือรายงานข้อผิดพลาด เจ้าหน้าที่กำลังตรวจสอบข้อมูลความถูกต้อง
             </div>
           </div>
@@ -915,11 +915,11 @@ export default function ItemDetail({ item: initialItem, onBack, currentUser, onS
 
         {isResolved && (
           <div className="detail-card" style={{
-            backgroundColor: "#0f2a1f", border: "1px solid #1f4a35", borderRadius: "14px",
+            backgroundColor: "var(--sc-ok-bg)", border: "1px solid var(--sc-ok-border)", borderRadius: "14px",
             padding: "13px 14px", marginBottom: "12px", display: "flex", gap: "10px", alignItems: "flex-start",
           }}>
-            <CheckCircle2 size={18} color="#34d399" style={{ flexShrink: 0, marginTop: "1px" }} />
-            <div style={{ fontSize: "12px", color: "#6ee7b7", lineHeight: "1.6" }}>
+            <CheckCircle2 size={18} color="var(--sc-ok-fg)" style={{ flexShrink: 0, marginTop: "1px" }} />
+            <div style={{ fontSize: "12px", color: "var(--sc-ok-fg-strong)", lineHeight: "1.6" }}>
               <strong>ส่งมอบคืนเรียบร้อยแล้ว:</strong> รายการนี้จะแสดงในระบบอีก 7 วัน หากท่านเป็นเจ้าของที่แท้จริงและสงสัยว่ามีการสวมสิทธิ์ สามารถกดปุ่มแจ้งสวมสิทธิ์ได้
             </div>
           </div>
@@ -1034,16 +1034,16 @@ export default function ItemDetail({ item: initialItem, onBack, currentUser, onS
             <div style={{ padding: "12px 16px", display: "flex", alignItems: "center", gap: "12px" }}>
               <div style={{
                 width: "38px", height: "38px", borderRadius: "10px",
-                background: "#0f2a1f", border: "1px solid #1f4a35",
+                background: "var(--sc-ok-bg)", border: "1px solid var(--sc-ok-border)",
                 display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0,
               }}>
-                <ShieldAlert size={17} color="#34d399" />
+                <ShieldAlert size={17} color="var(--sc-ok-fg)" />
               </div>
               <div>
-                <div style={{ fontSize: "11px", color: "#34d399", fontWeight: 700, marginBottom: "2px" }}>
+                <div style={{ fontSize: "11px", color: "var(--sc-ok-fg)", fontWeight: 700, marginBottom: "2px" }}>
                   จุดรับของ
                 </div>
-                <div style={{ fontSize: "13px", fontWeight: 700, color: "#6ee7b7", lineHeight: 1.4 }}>
+                <div style={{ fontSize: "13px", fontWeight: 700, color: "var(--sc-ok-fg-strong)", lineHeight: 1.4 }}>
                   {item.depositLocation}
                 </div>
               </div>
@@ -1154,12 +1154,12 @@ export default function ItemDetail({ item: initialItem, onBack, currentUser, onS
                 >
                   <div style={{
                     width: "32px", height: "32px", borderRadius: "8px",
-                    background: mp.confirmed ? "#0f2a1f" : "#2a2118",
-                    border: mp.confirmed ? "1px solid #1f4a35" : "1px solid #4a3418",
+                    background: mp.confirmed ? "var(--sc-ok-bg)" : "var(--sc-warn-bg)",
+                    border: mp.confirmed ? "1px solid var(--sc-ok-border)" : "1px solid var(--sc-warn-border)",
                     display: "flex", alignItems: "center", justifyContent: "center",
                     flexShrink: 0,
                   }}>
-                    <CheckCircle2 size={14} color={mp.confirmed ? "#34d399" : "#fbbf24"} />
+                    <CheckCircle2 size={14} color={mp.confirmed ? "var(--sc-ok-fg)" : "var(--sc-warn-fg)"} />
                   </div>
                   <div style={{ flex: 1, minWidth: 0 }}>
                     <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: "6px" }}>
@@ -1171,9 +1171,9 @@ export default function ItemDetail({ item: initialItem, onBack, currentUser, onS
                       </span>
                       <span style={{
                         fontSize: "11px", fontWeight: 800,
-                        color: mp.confirmed ? "#34d399" : "#fbbf24",
-                        background: mp.confirmed ? "#0f2a1f" : "#2a2118",
-                        border: mp.confirmed ? "1px solid #1f4a35" : "1px solid #4a3418",
+                        color: mp.confirmed ? "var(--sc-ok-fg)" : "var(--sc-warn-fg)",
+                        background: mp.confirmed ? "var(--sc-ok-bg)" : "var(--sc-warn-bg)",
+                        border: mp.confirmed ? "1px solid var(--sc-ok-border)" : "1px solid var(--sc-warn-border)",
                         padding: "2px 8px", borderRadius: "8px",
                         whiteSpace: "nowrap", flexShrink: 0,
                       }}>
@@ -1212,7 +1212,7 @@ export default function ItemDetail({ item: initialItem, onBack, currentUser, onS
                             borderRadius: 7,
                             border: "1px solid rgba(52,211,153,0.5)",
                             background: "rgba(52,211,153,0.14)",
-                            color: "#34d399",
+                            color: "var(--sc-ok-fg)",
                             fontSize: 10.5,
                             fontWeight: 800,
                             cursor: busyConfirmKey ? "wait" : "pointer",
@@ -1232,7 +1232,7 @@ export default function ItemDetail({ item: initialItem, onBack, currentUser, onS
                             borderRadius: 7,
                             border: "1px solid rgba(244,63,94,0.5)",
                             background: "rgba(244,63,94,0.10)",
-                            color: "#f87171",
+                            color: "var(--sc-danger-fg)",
                             fontSize: 10.5,
                             fontWeight: 800,
                             cursor: busyConfirmKey ? "wait" : "pointer",
@@ -1243,7 +1243,7 @@ export default function ItemDetail({ item: initialItem, onBack, currentUser, onS
                       </div>
                     ) : (
                       <div style={{
-                        fontSize: "10.5px", color: "#34d399", marginTop: "4px",
+                        fontSize: "10.5px", color: "var(--sc-ok-fg)", marginTop: "4px",
                         fontWeight: 700,
                       }}>
                         <CheckCircle2 size={11} style={{ verticalAlign: "-1px" }} />
@@ -1272,8 +1272,8 @@ export default function ItemDetail({ item: initialItem, onBack, currentUser, onS
           <div style={{ display: "flex", flexDirection: "column", gap: "0" }}>
             {[
               { label: "แจ้งข้อมูล", sub: "ผู้ใช้ทำการแจ้งของหาย/พบของ", done: true, color: "#7c5cfc" },
-              { label: "ตรวจสอบ", sub: "รอการตรวจสอบจากเจ้าหน้าที่", done: isInvestigating || isInProgress || isResolved, color: "#60a5fa" },
-              { label: isLost ? "เจ้าของมารับ" : "ส่งมอบของ", sub: isResolved ? "ดำเนินการเรียบร้อยแล้ว" : "รอการดำเนินการ", done: isResolved, color: "#34d399" },
+              { label: "ตรวจสอบ", sub: "รอการตรวจสอบจากเจ้าหน้าที่", done: isInvestigating || isInProgress || isResolved, color: "var(--sc-info-fg)" },
+              { label: isLost ? "เจ้าของมารับ" : "ส่งมอบของ", sub: isResolved ? "ดำเนินการเรียบร้อยแล้ว" : "รอการดำเนินการ", done: isResolved, color: "var(--sc-ok-fg)" },
             ].map((step, i, arr) => (
               <div key={i} style={{ display: "flex", gap: "12px" }}>
                 {/* Line + Dot */}
@@ -1319,9 +1319,9 @@ export default function ItemDetail({ item: initialItem, onBack, currentUser, onS
           {(isPending || isRejected) && (
             <div style={{
               padding: "12px", borderRadius: "12px", fontSize: "12px", fontWeight: 600, lineHeight: 1.5,
-              backgroundColor: isPending ? "#2a1a10" : "#2a1418",
-              border: isPending ? "1px solid #4a3418" : "1px solid #4a1f28",
-              color: isPending ? "#fbbf24" : "#f87171",
+              backgroundColor: isPending ? "var(--sc-warn-bg)" : "var(--sc-danger-bg)",
+              border: isPending ? "1px solid var(--sc-warn-border)" : "1px solid var(--sc-danger-border)",
+              color: isPending ? "var(--sc-warn-fg)" : "var(--sc-danger-fg)",
             }}>
               {isPending
                 ? "โพสต์นี้ยังไม่ถูกเผยแพร่ — รอแอดมินตรวจรับของที่จุดรับ นำของไปฝากที่จุดรับให้แอดมินตรวจแล้วจึงกดอนุมัติ"
@@ -1400,13 +1400,13 @@ export default function ItemDetail({ item: initialItem, onBack, currentUser, onS
               onClick={() => setShowReportModal(true)}
               style={{
                 width: "100%", padding: "14px", borderRadius: "14px",
-                border: "1.5px solid #4a1f28", backgroundColor: "#2a1418",
-                color: "#f87171", fontSize: "14px", fontWeight: 700,
+                border: "1.5px solid var(--sc-danger-border)", backgroundColor: "var(--sc-danger-bg)",
+                color: "var(--sc-danger-fg)", fontSize: "14px", fontWeight: 700,
                 cursor: "pointer",
                 display: "flex", alignItems: "center", justifyContent: "center", gap: "8px",
               }}
             >
-              <AlertTriangle size={18} color="#f87171" />
+              <AlertTriangle size={18} color="var(--sc-danger-fg)" />
               แจ้งสวมสิทธิ์ / รายงานความผิดพลาด
             </button>
           )}
@@ -1424,8 +1424,8 @@ export default function ItemDetail({ item: initialItem, onBack, currentUser, onS
                 transition: "color 0.15s, border-color 0.15s",
               }}
               onMouseEnter={(e) => {
-                e.currentTarget.style.color = "#f87171";
-                e.currentTarget.style.borderColor = "#f87171";
+                e.currentTarget.style.color = "var(--sc-danger-fg)";
+                e.currentTarget.style.borderColor = "var(--sc-danger-fg)";
               }}
               onMouseLeave={(e) => {
                 e.currentTarget.style.color = "var(--fg-muted)";
@@ -1459,8 +1459,8 @@ export default function ItemDetail({ item: initialItem, onBack, currentUser, onS
               onClick={() => setShowDeleteConfirm(true)}
               style={{
                 width: "100%", padding: "13px", borderRadius: "14px",
-                border: "1px solid #4a1f28", backgroundColor: "#2a1418",
-                color: "#f87171", fontSize: "13px", fontWeight: 700,
+                border: "1px solid var(--sc-danger-border)", backgroundColor: "var(--sc-danger-bg)",
+                color: "var(--sc-danger-fg)", fontSize: "13px", fontWeight: 700,
                 cursor: "pointer",
                 display: "flex", alignItems: "center", justifyContent: "center", gap: "8px",
                 marginTop: "2px",
@@ -1550,10 +1550,10 @@ export default function ItemDetail({ item: initialItem, onBack, currentUser, onS
               }}
             >
               <div style={{
-                backgroundColor: "#2a2118", border: "1px solid #4a3418", borderRadius: "12px",
+                backgroundColor: "var(--sc-warn-bg)", border: "1px solid var(--sc-warn-border)", borderRadius: "12px",
                 padding: "12px", marginBottom: "16px",
               }}>
-                <div style={{ fontSize: "11px", color: "#fcd34d", lineHeight: 1.5 }}>
+                <div style={{ fontSize: "11px", color: "var(--sc-warn-fg-strong)", lineHeight: 1.5 }}>
                   <strong>ขั้นตอนการรับของ:</strong><br />
                   1. ส่งคำขอ → โพสต์จะถูกจองให้คุณทันที (24 ชม. / ตามวันนัด)<br />
                   2. ไปที่จุดรับของพร้อมหลักฐานความเป็นเจ้าของ<br />
@@ -2071,8 +2071,8 @@ export default function ItemDetail({ item: initialItem, onBack, currentUser, onS
                     style={{
                       display: "flex", alignItems: "center", gap: 8,
                       width: "100%", padding: "10px 12px", borderRadius: "10px",
-                      border: "1.5px solid #1f4a35", fontSize: "12px", boxSizing: "border-box",
-                      backgroundColor: "#0f2a1f", color: "#6ee7b7",
+                      border: "1.5px solid var(--sc-ok-border)", fontSize: "12px", boxSizing: "border-box",
+                      backgroundColor: "var(--sc-ok-bg)", color: "var(--sc-ok-fg-strong)",
                     }}
                   >
                     <Lock size={13} />
@@ -2173,7 +2173,7 @@ export default function ItemDetail({ item: initialItem, onBack, currentUser, onS
             boxShadow: "0 25px 60px rgba(0,0,0,0.6)",
             border: "1px solid var(--border)",
           }}>
-            <div style={{ display: "flex", justifyContent: "center", marginBottom: "12px", color: "#f87171" }}>
+            <div style={{ display: "flex", justifyContent: "center", marginBottom: "12px", color: "var(--sc-danger-fg)" }}>
               <Trash2 size={36} />
             </div>
             <h3 style={{ fontSize: "18px", fontWeight: 800, color: "var(--fg)", marginBottom: "8px" }}>
@@ -2225,7 +2225,7 @@ export default function ItemDetail({ item: initialItem, onBack, currentUser, onS
             border: "1px solid var(--border)",
           }}>
             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "14px" }}>
-              <div style={{ display: "flex", alignItems: "center", gap: "8px", color: "#f87171", fontWeight: 800, fontSize: "16px" }}>
+              <div style={{ display: "flex", alignItems: "center", gap: "8px", color: "var(--sc-danger-fg)", fontWeight: 800, fontSize: "16px" }}>
                 <ShieldAlert size={20} />
                 แจ้งสวมสิทธิ์ / คืนผิดคน
               </div>
@@ -2390,7 +2390,7 @@ export default function ItemDetail({ item: initialItem, onBack, currentUser, onS
             border: "1px solid var(--border)",
           }}>
             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "14px" }}>
-              <div style={{ display: "flex", alignItems: "center", gap: "8px", color: "#f87171", fontWeight: 800, fontSize: "16px" }}>
+              <div style={{ display: "flex", alignItems: "center", gap: "8px", color: "var(--sc-danger-fg)", fontWeight: 800, fontSize: "16px" }}>
                 <Flag size={20} />
                 รายงานโพสต์
               </div>
@@ -2429,9 +2429,9 @@ export default function ItemDetail({ item: initialItem, onBack, currentUser, onS
                       style={{
                         padding: "5px 10px", borderRadius: 8, fontSize: "11px", fontWeight: 600,
                         border: "1px solid",
-                        borderColor: generalReportCategory === cat ? "#f87171" : "var(--border)",
+                        borderColor: generalReportCategory === cat ? "var(--sc-danger-fg)" : "var(--border)",
                         background: generalReportCategory === cat ? "rgba(248,113,113,0.12)" : "var(--bg-card)",
-                        color: generalReportCategory === cat ? "#f87171" : "var(--fg-muted)",
+                        color: generalReportCategory === cat ? "var(--sc-danger-fg)" : "var(--fg-muted)",
                         cursor: "pointer",
                       }}
                     >

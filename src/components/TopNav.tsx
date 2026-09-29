@@ -641,14 +641,14 @@ export default function TopNav({
                           const isExpired = isResult && n.status === "expired";
                           const isPostDeletedResult = isResult && n.status === "post_deleted";
                           const iconBg = isReport || isPostDeleted
-                            ? "#2a1418"
+                            ? "var(--sc-danger-bg)"
                             : isPostSuspended || (isPostHeld && !heldReleased)
-                            ? "#2a1a10"
-                            : isSupportMessage ? "#1c1626"
-                            : isFoundPending ? "#2a1a10"
-                            : (isClaim || approved || heldReleased || isReportResult || isAdminReply || isFoundApproved) ? "#0f2a1f"
-                            : isAdminRevoked ? "#2a1418"
-                            : "#2a1418";
+                            ? "var(--sc-warn-bg)"
+                            : isSupportMessage ? "var(--sc-brand-bg)"
+                            : isFoundPending ? "var(--sc-warn-bg)"
+                            : (isClaim || approved || heldReleased || isReportResult || isAdminReply || isFoundApproved) ? "var(--sc-ok-bg)"
+                            : isAdminRevoked ? "var(--sc-danger-bg)"
+                            : "var(--sc-danger-bg)";
                           const openNotif = () => {
                             markRead(n.id);
                             setNotifOpen(false);
@@ -705,40 +705,40 @@ export default function TopNav({
                                 {isClaim ? (
                                   <PackageCheck
                                     size={15}
-                                    color={unreadItem ? "#34d399" : "#6a9b8a"}
+                                    color={unreadItem ? "var(--sc-ok-fg)" : "#6a9b8a"}
                                   />
                                 ) : isReport ? (
-                                  <Flag size={15} color={unreadItem ? "#f87171" : "#a05050"} />
+                                  <Flag size={15} color={unreadItem ? "var(--sc-danger-fg)" : "var(--sc-muted-fg)"} />
                                 ) : isPostDeleted ? (
-                                  <Trash2 size={15} color={unreadItem ? "#f87171" : "#a05050"} />
+                                  <Trash2 size={15} color={unreadItem ? "var(--sc-danger-fg)" : "var(--sc-muted-fg)"} />
                                 ) : isPostSuspended ? (
-                                  <Ban size={15} color={unreadItem ? "#fbbf24" : "#a57d3a"} />
+                                  <Ban size={15} color={unreadItem ? "var(--sc-warn-fg)" : "var(--sc-muted-fg)"} />
                                 ) : isPostHeld ? (
                                   heldReleased ? (
-                                    <ShieldCheck size={15} color={unreadItem ? "#34d399" : "#6a9b8a"} />
+                                    <ShieldCheck size={15} color={unreadItem ? "var(--sc-ok-fg)" : "#6a9b8a"} />
                                   ) : (
-                                    <ShieldAlert size={15} color={unreadItem ? "#fbbf24" : "#a57d3a"} />
+                                    <ShieldAlert size={15} color={unreadItem ? "var(--sc-warn-fg)" : "var(--sc-muted-fg)"} />
                                   )
                                 ) : isSupportMessage ? (
-                                  <MessageSquare size={15} color={unreadItem ? "#a78bfa" : "#7a5f9e"} />
+                                  <MessageSquare size={15} color={unreadItem ? "var(--sc-brand-fg)" : "var(--sc-muted-fg)"} />
                                 ) : isFoundPending ? (
-                                  <PackageSearch size={15} color={unreadItem ? "#fbbf24" : "#a57d3a"} />
+                                  <PackageSearch size={15} color={unreadItem ? "var(--sc-warn-fg)" : "var(--sc-muted-fg)"} />
                                 ) : isFoundApproved ? (
-                                  <CheckCircle2 size={15} color={unreadItem ? "#34d399" : "#6a9b8a"} />
+                                  <CheckCircle2 size={15} color={unreadItem ? "var(--sc-ok-fg)" : "#6a9b8a"} />
                                 ) : isFoundRejected ? (
-                                  <XCircle size={15} color="#f87171" />
+                                  <XCircle size={15} color="var(--sc-danger-fg)" />
                                 ) : isAdminReply ? (
-                                  <Reply size={15} color={unreadItem ? "#34d399" : "#6a9b8a"} />
+                                  <Reply size={15} color={unreadItem ? "var(--sc-ok-fg)" : "#6a9b8a"} />
                                 ) : isAdminRevoked ? (
-                                  <ShieldAlert size={15} color={unreadItem ? "#f87171" : "#a05050"} />
+                                  <ShieldAlert size={15} color={unreadItem ? "var(--sc-danger-fg)" : "var(--sc-muted-fg)"} />
                                 ) : isReportResult ? (
-                                  <CheckCheck size={15} color={unreadItem ? "#34d399" : "#6a9b8a"} />
+                                  <CheckCheck size={15} color={unreadItem ? "var(--sc-ok-fg)" : "#6a9b8a"} />
                                 ) : isExpired ? (
-                                  <Clock size={15} color={unreadItem ? "#fbbf24" : "#a57d3a"} />
+                                  <Clock size={15} color={unreadItem ? "var(--sc-warn-fg)" : "var(--sc-muted-fg)"} />
                                 ) : approved ? (
-                                  <CheckCircle2 size={15} color="#34d399" />
+                                  <CheckCircle2 size={15} color="var(--sc-ok-fg)" />
                                 ) : (
-                                  <XCircle size={15} color="#f87171" />
+                                  <XCircle size={15} color="var(--sc-danger-fg)" />
                                 )}
                               </div>
                               <div style={{ flex: 1, minWidth: 0 }}>
@@ -762,86 +762,86 @@ export default function TopNav({
                                   ) : isReport ? (
                                     <>
                                       มีรายงานโพสต์ใหม่จาก{" "}
-                                      <span style={{ color: "#f87171" }}>
+                                      <span style={{ color: "var(--sc-danger-fg)" }}>
                                         {n.reporterName || "ผู้ใช้งาน"}
                                       </span>
                                     </>
                                   ) : isPostDeleted ? (
                                     <>
                                       โพสต์ของคุณ{" "}
-                                      <span style={{ color: "#f87171" }}>ถูกลบ</span>{" "}
+                                      <span style={{ color: "var(--sc-danger-fg)" }}>ถูกลบ</span>{" "}
                                       โดยผู้ดูแลระบบ
                                     </>
                                   ) : isPostSuspended ? (
                                     <>
                                       โพสต์ของคุณ{" "}
-                                      <span style={{ color: "#fbbf24" }}>ถูกระงับ</span>{" "}
+                                      <span style={{ color: "var(--sc-warn-fg)" }}>ถูกระงับ</span>{" "}
                                       โดยผู้ดูแลระบบ
                                     </>
                                   ) : isPostHeld ? (
                                     heldReleased ? (
                                       <>
                                         โพสต์ของคุณ{" "}
-                                        <span style={{ color: "#34d399" }}>ถูกปลดอายัดแล้ว</span>
+                                        <span style={{ color: "var(--sc-ok-fg)" }}>ถูกปลดอายัดแล้ว</span>
                                       </>
                                     ) : (
                                       <>
                                         โพสต์ของคุณ{" "}
-                                        <span style={{ color: "#fbbf24" }}>ถูกอายัดชั่วคราว</span>{" "}
+                                        <span style={{ color: "var(--sc-warn-fg)" }}>ถูกอายัดชั่วคราว</span>{" "}
                                         รอเจ้าหน้าที่ตรวจสอบ
                                       </>
                                     )
                                   ) : isSupportMessage ? (
                                     <>
                                       มีเรื่องแจ้งแอดมินจาก{" "}
-                                      <span style={{ color: "#a78bfa" }}>
+                                      <span style={{ color: "var(--sc-brand-fg)" }}>
                                         {n.reporterName || "ผู้ใช้"}
                                       </span>
                                     </>
                                   ) : isFoundPending ? (
                                     <>
                                       มีคำขอโพสต์ของพบจาก{" "}
-                                      <span style={{ color: "#fbbf24" }}>
+                                      <span style={{ color: "var(--sc-warn-fg)" }}>
                                         {n.reporterName || "ผู้ใช้"}
                                       </span>
                                     </>
                                   ) : isFoundApproved ? (
                                     <>
                                       โพสต์ของพบของคุณ{" "}
-                                      <span style={{ color: "#34d399" }}>ถูกอนุมัติแล้ว</span>{" "}
+                                      <span style={{ color: "var(--sc-ok-fg)" }}>ถูกอนุมัติแล้ว</span>{" "}
                                       (นำของไปฝากแล้ว)
                                     </>
                                   ) : isFoundRejected ? (
                                     <>
                                       คำขอโพสต์ของพบของคุณ{" "}
-                                      <span style={{ color: "#f87171" }}>ถูกปฏิเสธ</span>
+                                      <span style={{ color: "var(--sc-danger-fg)" }}>ถูกปฏิเสธ</span>
                                     </>
                                   ) : isAdminReply ? (
                                     <>
                                       แอดมินตอบกลับ:{" "}
-                                      <span style={{ color: "#34d399" }}>
+                                      <span style={{ color: "var(--sc-ok-fg)" }}>
                                         {n.text || "ข้อความจากผู้ดูแลระบบ"}
                                       </span>
                                     </>
                                   ) : isAdminRevoked ? (
                                     <>
                                       สิทธิ์เจ้าหน้าที่ประจำจุดของคุณ{" "}
-                                      <span style={{ color: "#f87171" }}>ถูกถอดออกแล้ว</span>
+                                      <span style={{ color: "var(--sc-danger-fg)" }}>ถูกถอดออกแล้ว</span>
                                     </>
                                   ) : isReportResult ? (
                                     <>
                                       รายงานของคุณ{" "}
-                                      <span style={{ color: "#34d399" }}>ได้รับการจัดการแล้ว</span>
+                                      <span style={{ color: "var(--sc-ok-fg)" }}>ได้รับการจัดการแล้ว</span>
                                     </>
                                   ) : approved ? (
                                     <>
                                       คำขอรับของของคุณถูก{" "}
-                                      <span style={{ color: "#34d399" }}>อนุมัติแล้ว</span>
+                                      <span style={{ color: "var(--sc-ok-fg)" }}>อนุมัติแล้ว</span>
                                     </>
                                   ) : isExpired ? (
                                     <>
                                       คำขอรับของของคุณ{" "}
-                                      <span style={{ color: "#fbbf24" }}>หมดอายุแล้ว</span>{" "}
+                                      <span style={{ color: "var(--sc-warn-fg)" }}>หมดอายุแล้ว</span>{" "}
                                       (ไม่ได้มารับตามเวลาที่กำหนด)
                                     </>
                                   ) : isPostDeletedResult ? (
@@ -853,7 +853,7 @@ export default function TopNav({
                                   ) : (
                                     <>
                                       คำขอรับของของคุณถูก{" "}
-                                      <span style={{ color: "#f87171" }}>ปฏิเสธ</span>
+                                      <span style={{ color: "var(--sc-danger-fg)" }}>ปฏิเสธ</span>
                                     </>
                                   )}
                                 </div>
@@ -886,13 +886,13 @@ export default function TopNav({
                                     height: 8,
                                     borderRadius: "50%",
                                     background: isReport || isPostDeleted
-                                      ? "#f87171"
-                                      : isAdminRevoked ? "#f87171"
-                                      : isSupportMessage ? "#a78bfa"
-                                      : isFoundPending ? "#fbbf24"
-                                      : isExpired || isPostSuspended || (isPostHeld && !heldReleased) ? "#fbbf24"
+                                      ? "var(--sc-danger-fg)"
+                                      : isAdminRevoked ? "var(--sc-danger-fg)"
+                                      : isSupportMessage ? "var(--sc-brand-fg)"
+                                      : isFoundPending ? "var(--sc-warn-fg)"
+                                      : isExpired || isPostSuspended || (isPostHeld && !heldReleased) ? "var(--sc-warn-fg)"
                                       : isPostDeletedResult ? "var(--fg-faint)"
-                                      : isResult && !approved ? "#f87171" : "#34d399",
+                                      : isResult && !approved ? "var(--sc-danger-fg)" : "var(--sc-ok-fg)",
                                     flexShrink: 0,
                                     marginTop: 5,
                                   }}

@@ -81,14 +81,14 @@ export default function LogoutConfirmModal({
               width: 56,
               height: 56,
               borderRadius: 16,
-              backgroundColor: "#2a1418",
-              border: "1px solid #4a1f28",
+              backgroundColor: "var(--sc-danger-bg)",
+              border: "1px solid var(--sc-danger-border)",
               display: "flex",
               alignItems: "center",
               justifyContent: "center",
             }}
           >
-            <LogOut size={26} color="#f87171" />
+            <LogOut size={26} color="var(--sc-danger-fg)" />
           </div>
 
           <div>
@@ -145,9 +145,9 @@ export default function LogoutConfirmModal({
                 flex: 1,
                 padding: "11px 0",
                 borderRadius: 12,
-                border: "1px solid #4a1f28",
-                backgroundColor: "#2a1418",
-                color: "#f87171",
+                border: "1px solid var(--sc-danger-border)",
+                backgroundColor: "var(--sc-danger-bg)",
+                color: "var(--sc-danger-fg)",
                 fontSize: 14,
                 fontWeight: 600,
                 cursor: "pointer",

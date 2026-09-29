@@ -330,7 +330,7 @@ export default function Login({ onLogin, onAdminDenied, onLoginStart }: LoginPro
         .lf-banner-title-brand {
           display: block;
           margin-top: 8px;
-          background: linear-gradient(120deg, #fff 20%, #c7d2fe 60%, #a5b4fc 100%);
+          background: linear-gradient(120deg, #fff 20%, var(--sc-info-fg) 60%, var(--sc-info-fg) 100%);
           -webkit-background-clip: text;
           background-clip: text;
           -webkit-text-fill-color: transparent;

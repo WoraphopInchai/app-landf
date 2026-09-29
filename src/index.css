@@ -10,6 +10,32 @@ body,
 /* =========================================================
    Frame.io — Dark Modern SaaS Design Tokens
    ========================================================= */
+/* ---- Status chip tokens (--sc-*) : ใช้คู่กันเป็น bg/border/fg
+   โหมดมืด = ค่าเข้มเดิม โหมดสว่าง = pastel อ่านชัด ---- */
+:root {
+  --sc-ok-bg: #0f2a1f;
+  --sc-ok-border: #1f4a35;
+  --sc-ok-fg: #34d399;
+  --sc-ok-fg-strong: #6ee7b7;
+  --sc-danger-bg: #2a1418;
+  --sc-danger-border: #4a1f28;
+  --sc-danger-fg: #f87171;
+  --sc-danger-fg-strong: #fca5a5;
+  --sc-warn-bg: #2a1a10;
+  --sc-warn-border: #4a3418;
+  --sc-warn-fg: #fbbf24;
+  --sc-warn-fg-strong: #fcd34d;
+  --sc-info-bg: #172036;
+  --sc-info-border: #2a3a5c;
+  --sc-info-fg: #60a5fa;
+  --sc-muted-bg: #1c1a24;
+  --sc-muted-border: #3a3350;
+  --sc-muted-fg: #9ca3af;
+  --sc-brand-bg: #1c1626;
+  --sc-brand-border: #3a2f52;
+  --sc-brand-fg: #a78bfa;
+}
+
 :root {
   --bg: #0b0a10;
   --bg-subtle: #131019;
@@ -52,6 +78,27 @@ body,
    ไอคอน/ปุ่มสีม่วง (--accent) ยังใช้ --accent-fg เป็นข้อความขาว
    ========================================================= */
 [data-theme="light"] {
+  --sc-ok-bg: #ecfdf5;
+  --sc-ok-border: #a7f3d0;
+  --sc-ok-fg: #059669;
+  --sc-ok-fg-strong: #10b981;
+  --sc-danger-bg: #fef2f2;
+  --sc-danger-border: #fca5a5;
+  --sc-danger-fg: #dc2626;
+  --sc-danger-fg-strong: #ef4444;
+  --sc-warn-bg: #fffbeb;
+  --sc-warn-border: #fcd34d;
+  --sc-warn-fg: #b45309;
+  --sc-warn-fg-strong: #d97706;
+  --sc-info-bg: #eff6ff;
+  --sc-info-border: #bfdbfe;
+  --sc-info-fg: #1d4ed8;
+  --sc-muted-bg: #f1f5f9;
+  --sc-muted-border: #d1d5db;
+  --sc-muted-fg: #6b7280;
+  --sc-brand-bg: #f5f3ff;
+  --sc-brand-border: #ddd6fe;
+  --sc-brand-fg: #6d28d9;
   --bg: #f3f1fa;
   --bg-subtle: #ffffff;
   --bg-card: #ffffff;

@@ -259,6 +259,7 @@ export default function Home({
             userId: data.userId || "",
             reporterName: data.reporterName || "ผู้ใช้งานทั่วไป",
             matches: data.matches || [],
+            nearMatches: data.nearMatches || [],
             aiData: data.aiData || null,
           } as PostItem;
         });
@@ -355,6 +356,7 @@ export default function Home({
             userId: data.userId || uid,
             reporterName: data.reporterName || "ผู้ใช้งานทั่วไป",
             matches: data.matches || [],
+            nearMatches: data.nearMatches || [],
             aiData: data.aiData || null,
           } as PostItem;
         });
@@ -627,22 +629,22 @@ export default function Home({
 
     if (isResolved)
       return (
-        <span style={{ ...style, background: "#1c1a24", color: "var(--fg-secondary)", borderColor: "var(--border)" }}>
-          <CheckCircle2 size={11} color="#34d399" />
+        <span style={{ ...style, background: "var(--sc-muted-bg)", color: "var(--fg-secondary)", borderColor: "var(--border)" }}>
+          <CheckCircle2 size={11} color="var(--sc-ok-fg)" />
           คืนแล้ว ({getDaysLeft(post.resolvedAt)} วัน)
         </span>
       );
     if (isInvestigating)
       return (
-        <span style={{ ...style, background: "#2a1418", color: "#f87171", borderColor: "#4a1f28" }}>
-          <span style={{ width: 6, height: 6, borderRadius: "50%", background: "#f87171" }} />
+        <span style={{ ...style, background: "var(--sc-danger-bg)", color: "var(--sc-danger-fg)", borderColor: "var(--sc-danger-border)" }}>
+          <span style={{ width: 6, height: 6, borderRadius: "50%", background: "var(--sc-danger-fg)" }} />
           ตรวจสอบ
         </span>
       );
     if (isInProgress)
       return (
-        <span style={{ ...style, background: "#172036", color: "#60a5fa", borderColor: "#2a3a5c" }}>
-          <span style={{ width: 6, height: 6, borderRadius: "50%", background: "#60a5fa" }} />
+        <span style={{ ...style, background: "var(--sc-info-bg)", color: "var(--sc-info-fg)", borderColor: "var(--sc-info-border)" }}>
+          <span style={{ width: 6, height: 6, borderRadius: "50%", background: "var(--sc-info-fg)" }} />
           กำลังดำเนินการ
         </span>
       );
@@ -650,9 +652,9 @@ export default function Home({
       <span
         style={{
           ...style,
-          background: isLost ? "#2a1a10" : "#0f2a1f",
-          color: isLost ? "#fb923c" : "#34d399",
-          borderColor: isLost ? "#4a3418" : "#1f4a35",
+          background: isLost ? "var(--sc-warn-bg)" : "var(--sc-ok-bg)",
+          color: isLost ? "var(--sc-warn-fg)" : "var(--sc-ok-fg)",
+          borderColor: isLost ? "var(--sc-warn-border)" : "var(--sc-ok-border)",
         }}
       >
         <span
@@ -660,7 +662,7 @@ export default function Home({
             width: 6,
             height: 6,
             borderRadius: "50%",
-            background: isLost ? "#fb923c" : "#34d399",
+            background: isLost ? "var(--sc-warn-fg)" : "var(--sc-ok-fg)",
           }}
         />
         {isLost ? "ของหาย (LOST)" : "ของพบ (FOUND)"}
@@ -1259,7 +1261,7 @@ export default function Home({
                     gap: 5,
                     fontSize: 10,
                     fontWeight: 800,
-                    color: "#34d399",
+                    color: "var(--sc-ok-fg)",
                     background: "rgba(52,211,153,0.12)",
                     border: "1px solid rgba(52,211,153,0.3)",
                     padding: "3px 8px",
@@ -1267,7 +1269,7 @@ export default function Home({
                     letterSpacing: "0.05em",
                   }}
                 >
-                  <span style={{ width: 5, height: 5, borderRadius: "50%", background: "#34d399", animation: "lafPulse 1.4s ease-in-out infinite" }} />
+                  <span style={{ width: 5, height: 5, borderRadius: "50%", background: "var(--sc-ok-fg)", animation: "lafPulse 1.4s ease-in-out infinite" }} />
                   LIVE
                 </span>
               </div>
@@ -1275,8 +1277,8 @@ export default function Home({
               {/* Stat blocks */}
               <div style={{ display: "flex", gap: 8, marginTop: 14 }}>
                 {[
-                  { label: "ของหาย", value: String(heroData.lostCount), color: "#fb923c" },
-                  { label: "ของพบ", value: String(heroData.foundCount), color: "#34d399" },
+                  { label: "ของหาย", value: String(heroData.lostCount), color: "var(--sc-warn-fg)" },
+                  { label: "ของพบ", value: String(heroData.foundCount), color: "var(--sc-ok-fg)" },
                   { label: "คืนแล้ว", value: String(heroData.resolvedCount), color: "var(--fg-secondary)" },
                 ].map((s) => (
                   <div
@@ -1328,7 +1330,7 @@ export default function Home({
                         borderRadius: 4,
                         background:
                           i >= 5
-                            ? "linear-gradient(180deg, #a78bfa, #7c5cfc)"
+                            ? "linear-gradient(180deg, var(--sc-brand-fg), #7c5cfc)"
                             : "#2f2a44",
                         boxShadow:
                           i >= 5 ? "0 0 10px rgba(124,92,252,0.5)" : "none",
@@ -1415,7 +1417,7 @@ export default function Home({
                           justifyContent: "center",
                           fontSize: 12,
                           fontWeight: 800,
-                          color: isLost ? "#fb923c" : "#34d399",
+                          color: isLost ? "var(--sc-warn-fg)" : "var(--sc-ok-fg)",
                         }}
                       >
                         {(post.title || "?").charAt(0).toUpperCase()}
@@ -1432,9 +1434,9 @@ export default function Home({
                         style={{
                           fontSize: 9.5,
                           fontWeight: 800,
-                          color: isLost ? "#fb923c" : "#34d399",
-                          background: isLost ? "#2a1a10" : "#0f2a1f",
-                          border: isLost ? "1px solid #4a3418" : "1px solid #1f4a35",
+                          color: isLost ? "var(--sc-warn-fg)" : "var(--sc-ok-fg)",
+                          background: isLost ? "var(--sc-warn-bg)" : "var(--sc-ok-bg)",
+                          border: isLost ? "1px solid var(--sc-warn-border)" : "1px solid var(--sc-ok-border)",
                           padding: "3px 7px",
                           borderRadius: 999,
                         }}
@@ -1734,7 +1736,7 @@ export default function Home({
                       gap: 5,
                       fontSize: 11,
                       fontWeight: 700,
-                      color: "#34d399",
+                      color: "var(--sc-ok-fg)",
                       padding: "5px 10px",
                       borderRadius: 999,
                       background: "rgba(52,211,153,0.10)",
@@ -1785,10 +1787,10 @@ export default function Home({
                   border: "1px solid rgba(251,191,36,0.25)",
                 }}
               >
-                <Clock size={12} color="#fbbf24" style={{ flexShrink: 0 }} />
+                <Clock size={12} color="var(--sc-warn-fg)" style={{ flexShrink: 0 }} />
                 <span>
                   โพสต์ของพบของคุณยัง{" "}
-                  <span style={{ color: "#fbbf24", fontWeight: 800 }}>
+                  <span style={{ color: "var(--sc-warn-fg)", fontWeight: 800 }}>
                     รอแอดมินอนุมัติตรวจรับ
                   </span>{" "}
                   — แมทพร้อมแล้ว แต่จะแสดงให้อีกฝ่ายเห็นหลังอนุมัติ
@@ -1807,7 +1809,7 @@ export default function Home({
                         gap: 6,
                         fontSize: 11.5,
                         fontWeight: 800,
-                        color: "#34d399",
+                        color: "var(--sc-ok-fg)",
                       }}
                     >
                       <CheckCircle2 size={12} />
@@ -1862,16 +1864,16 @@ export default function Home({
                                 width: 34,
                                 height: 34,
                                 borderRadius: 9,
-                                background: otherLost ? "#2a1a10" : "#0f2a1f",
+                                background: otherLost ? "var(--sc-warn-bg)" : "var(--sc-ok-bg)",
                                 border: otherLost
-                                  ? "1px solid #4a3418"
-                                  : "1px solid #1f4a35",
+                                  ? "1px solid var(--sc-warn-border)"
+                                  : "1px solid var(--sc-ok-border)",
                                 display: "flex",
                                 alignItems: "center",
                                 justifyContent: "center",
                                 fontSize: 13,
                                 fontWeight: 800,
-                                color: otherLost ? "#fb923c" : "#34d399",
+                                color: otherLost ? "var(--sc-warn-fg)" : "var(--sc-ok-fg)",
                                 flexShrink: 0,
                               }}
                             >
@@ -1883,7 +1885,7 @@ export default function Home({
                               style={{
                                 fontSize: 10.5,
                                 fontWeight: 700,
-                                color: "#34d399",
+                                color: "var(--sc-ok-fg)",
                                 whiteSpace: "nowrap",
                                 overflow: "hidden",
                                 textOverflow: "ellipsis",
@@ -1945,7 +1947,7 @@ export default function Home({
                                 fontSize: 9,
                                 fontWeight: 800,
                                 letterSpacing: "0.4px",
-                                color: "#34d399",
+                                color: "var(--sc-ok-fg)",
                                 background: "rgba(52,211,153,0.14)",
                                 border: "1px solid rgba(52,211,153,0.40)",
                                 padding: "2px 7px",
@@ -1965,7 +1967,7 @@ export default function Home({
                                 fontWeight: 800,
                                 background: "rgba(52,211,153,0.12)",
                                 border: "1px solid rgba(52,211,153,0.35)",
-                                color: "#34d399",
+                                color: "var(--sc-ok-fg)",
                                 padding: "3px 8px",
                                 borderRadius: 999,
                               }}
@@ -1988,7 +1990,7 @@ export default function Home({
                         gap: 6,
                         fontSize: 11.5,
                         fontWeight: 800,
-                        color: "#fbbf24",
+                        color: "var(--sc-warn-fg)",
                       }}
                     >
                       <Sparkles size={12} />
@@ -2044,16 +2046,16 @@ export default function Home({
                                 width: 34,
                                 height: 34,
                                 borderRadius: 9,
-                                background: otherLost ? "#2a1a10" : "#0f2a1f",
+                                background: otherLost ? "var(--sc-warn-bg)" : "var(--sc-ok-bg)",
                                 border: otherLost
-                                  ? "1px solid #4a3418"
-                                  : "1px solid #1f4a35",
+                                  ? "1px solid var(--sc-warn-border)"
+                                  : "1px solid var(--sc-ok-border)",
                                 display: "flex",
                                 alignItems: "center",
                                 justifyContent: "center",
                                 fontSize: 13,
                                 fontWeight: 800,
-                                color: otherLost ? "#fb923c" : "#34d399",
+                                color: otherLost ? "var(--sc-warn-fg)" : "var(--sc-ok-fg)",
                                 flexShrink: 0,
                               }}
                             >
@@ -2065,7 +2067,7 @@ export default function Home({
                               style={{
                                 fontSize: 10.5,
                                 fontWeight: 700,
-                                color: "#fbbf24",
+                                color: "var(--sc-warn-fg)",
                                 whiteSpace: "nowrap",
                                 overflow: "hidden",
                                 textOverflow: "ellipsis",
@@ -2127,7 +2129,7 @@ export default function Home({
                                 fontSize: 9,
                                 fontWeight: 800,
                                 letterSpacing: "0.4px",
-                                color: "#fbbf24",
+                                color: "var(--sc-warn-fg)",
                                 background: "rgba(251,191,36,0.14)",
                                 border: "1px solid rgba(251,191,36,0.40)",
                                 padding: "2px 7px",
@@ -2177,7 +2179,7 @@ export default function Home({
                                   borderRadius: 7,
                                   border: "1px solid rgba(52,211,153,0.45)",
                                   background: "rgba(52,211,153,0.14)",
-                                  color: "#34d399",
+                                  color: "var(--sc-ok-fg)",
                                   fontSize: 10.5,
                                   fontWeight: 800,
                                   cursor: busy ? "wait" : "pointer",
@@ -2202,7 +2204,7 @@ export default function Home({
                                   borderRadius: 7,
                                   border: "1px solid rgba(244,63,94,0.45)",
                                   background: "rgba(244,63,94,0.10)",
-                                  color: "#f87171",
+                                  color: "var(--sc-danger-fg)",
                                   fontSize: 10.5,
                                   fontWeight: 800,
                                   cursor: busy ? "wait" : "pointer",
@@ -2264,7 +2266,7 @@ export default function Home({
                   flexShrink: 0,
                 }}
               >
-                <Clock size={14} color="#fbbf24" />
+                <Clock size={14} color="var(--sc-warn-fg)" />
               </div>
               <div style={{ flex: 1, minWidth: 0, fontSize: 13, fontWeight: 800, color: "var(--fg)" }}>
                 AI ใกล้เคียง — ยังไม่ยืนยัน
@@ -2320,16 +2322,16 @@ const busy = busyConfirmKey === rowKey;
                           width: 34,
                           height: 34,
                           borderRadius: 9,
-                          background: otherLost ? "#2a1a10" : "#0f2a1f",
+                          background: otherLost ? "var(--sc-warn-bg)" : "var(--sc-ok-bg)",
                           border: otherLost
-                            ? "1px solid #4a3418"
-                            : "1px solid #1f4a35",
+                            ? "1px solid var(--sc-warn-border)"
+                            : "1px solid var(--sc-ok-border)",
                           display: "flex",
                           alignItems: "center",
                           justifyContent: "center",
                           fontSize: 13,
                           fontWeight: 800,
-                          color: otherLost ? "#fb923c" : "#34d399",
+                          color: otherLost ? "var(--sc-warn-fg)" : "var(--sc-ok-fg)",
                           flexShrink: 0,
                         }}
                       >
@@ -2341,7 +2343,7 @@ const busy = busyConfirmKey === rowKey;
                         style={{
                           fontSize: 10.5,
                           fontWeight: 700,
-                          color: "#fbbf24",
+                          color: "var(--sc-warn-fg)",
                           whiteSpace: "nowrap",
                           overflow: "hidden",
                           textOverflow: "ellipsis",
@@ -2392,7 +2394,7 @@ const busy = busyConfirmKey === rowKey;
                           fontSize: 9,
                           fontWeight: 800,
                           letterSpacing: "0.4px",
-                          color: row.confirmed ? "#34d399" : "#fbbf24",
+                          color: row.confirmed ? "var(--sc-ok-fg)" : "var(--sc-warn-fg)",
                           background: row.confirmed
                             ? "rgba(52,211,153,0.14)"
                             : "rgba(251,191,36,0.12)",
@@ -2421,7 +2423,7 @@ const busy = busyConfirmKey === rowKey;
                           borderColor: row.confirmed
                             ? "rgba(52,211,153,0.35)"
                             : "rgba(251,191,36,0.30)",
-                          color: row.confirmed ? "#34d399" : "#fbbf24",
+                          color: row.confirmed ? "var(--sc-ok-fg)" : "var(--sc-warn-fg)",
                           padding: "3px 8px",
                           borderRadius: 999,
                         }}
@@ -2447,7 +2449,7 @@ const busy = busyConfirmKey === rowKey;
                               borderRadius: 7,
                               border: "1px solid rgba(52,211,153,0.45)",
                               background: "rgba(52,211,153,0.14)",
-                              color: "#34d399",
+                              color: "var(--sc-ok-fg)",
                               fontSize: 10.5,
                               fontWeight: 800,
                               cursor: busy ? "wait" : "pointer",
@@ -2472,7 +2474,7 @@ const busy = busyConfirmKey === rowKey;
                               borderRadius: 7,
                               border: "1px solid rgba(244,63,94,0.45)",
                               background: "rgba(244,63,94,0.10)",
-                              color: "#f87171",
+                              color: "var(--sc-danger-fg)",
                               fontSize: 10.5,
                               fontWeight: 800,
                               cursor: busy ? "wait" : "pointer",
@@ -2915,7 +2917,7 @@ const busy = busyConfirmKey === rowKey;
                               gap: 4,
                               fontSize: 10.5,
                               fontWeight: 700,
-                              color: "#c4b5fd",
+                              color: "var(--sc-brand-fg)",
                               background: "rgba(124,92,252,0.15)",
                               border: "1px solid rgba(124,92,252,0.4)",
                               padding: "2px 8px",
@@ -2923,7 +2925,7 @@ const busy = busyConfirmKey === rowKey;
                               cursor: "default",
                             }}
                           >
-                            <Sparkles size={11} color="#c4b5fd" />
+                            <Sparkles size={11} color="var(--sc-brand-fg)" />
                             ตรง {bestExternalMatch.similarityScore}%
                           </span>
                         )}
@@ -2956,8 +2958,8 @@ const busy = busyConfirmKey === rowKey;
                               transition: "color 0.15s, border-color 0.15s",
                             }}
                             onMouseEnter={(e) => {
-                              e.currentTarget.style.color = "#f87171";
-                              e.currentTarget.style.borderColor = "#f87171";
+                              e.currentTarget.style.color = "var(--sc-danger-fg)";
+                              e.currentTarget.style.borderColor = "var(--sc-danger-fg)";
                             }}
                             onMouseLeave={(e) => {
                               e.currentTarget.style.color = "var(--fg-faint)";
@@ -3395,7 +3397,7 @@ const busy = busyConfirmKey === rowKey;
             onClick={(e) => e.stopPropagation()}
           >
             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 14 }}>
-              <div style={{ display: "flex", alignItems: "center", gap: 8, color: "#f87171", fontWeight: 800, fontSize: 15 }}>
+              <div style={{ display: "flex", alignItems: "center", gap: 8, color: "var(--sc-danger-fg)", fontWeight: 800, fontSize: 15 }}>
                 <Flag size={18} />
                 รายงานโพสต์
               </div>
@@ -3439,9 +3441,9 @@ const busy = busyConfirmKey === rowKey;
                       style={{
                         padding: "5px 10px", borderRadius: 8, fontSize: 11, fontWeight: 600,
                         border: "1px solid",
-                        borderColor: reportCategory === cat ? "#f87171" : "var(--border)",
+                        borderColor: reportCategory === cat ? "var(--sc-danger-fg)" : "var(--border)",
                         background: reportCategory === cat ? "rgba(248,113,113,0.12)" : "var(--bg-card)",
-                        color: reportCategory === cat ? "#f87171" : "var(--fg-muted)",
+                        color: reportCategory === cat ? "var(--sc-danger-fg)" : "var(--fg-muted)",
                         cursor: "pointer",
                       }}
                     >

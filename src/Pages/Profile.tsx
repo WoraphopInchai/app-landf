@@ -518,15 +518,15 @@ export default function Profile({ user, onBack, onLogout, onNameUpdated }: Profi
           onClick={onLogout}
           style={{
             width: "100%",
-            backgroundColor: "#2a1418",
-            border: "1px solid #4a1f28",
+            backgroundColor: "var(--sc-danger-bg)",
+            border: "1px solid var(--sc-danger-border)",
             borderRadius: "16px",
             padding: "16px",
             display: "flex",
             alignItems: "center",
             justifyContent: "space-between",
             gap: "8px",
-            color: "#f87171",
+            color: "var(--sc-danger-fg)",
             fontSize: "14px",
             fontWeight: 600,
             cursor: "pointer",
@@ -534,12 +534,12 @@ export default function Profile({ user, onBack, onLogout, onNameUpdated }: Profi
           }}
         >
           <div style={{ display: "flex", alignItems: "center", gap: "12px" }}>
-            <div style={{ width: "38px", height: "38px", borderRadius: "12px", backgroundColor: "#4a1f28", border: "1px solid #5c2534", display: "flex", alignItems: "center", justifyContent: "center" }}>
-              <LogOut size={18} color="#f87171" />
+            <div style={{ width: "38px", height: "38px", borderRadius: "12px", backgroundColor: "var(--sc-danger-border)", border: "1px solid var(--sc-danger-border)", display: "flex", alignItems: "center", justifyContent: "center" }}>
+              <LogOut size={18} color="var(--sc-danger-fg)" />
             </div>
             <span>ออกจากระบบ</span>
           </div>
-          <ChevronRight size={18} color="#f87171" />
+          <ChevronRight size={18} color="var(--sc-danger-fg)" />
         </button>
 
       </div>

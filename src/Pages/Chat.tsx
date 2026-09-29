@@ -112,10 +112,10 @@ const formatListTime = (ts?: FirestoreTimeLike) => {
 
 // Avatar — gradient ตามชื่อ (สุ่มเบาๆ จาก hash) เพื่อความรู้สึกทันสมัย
 const AVATAR_GRADIENTS = [
-  "linear-gradient(135deg, #6f6b80 0%, #3a3550 100%)",
-  "linear-gradient(135deg, #9a94b0 0%, #5c5670 100%)",
+  "linear-gradient(135deg, var(--sc-muted-fg) 0%, #3a3550 100%)",
+  "linear-gradient(135deg, var(--sc-muted-fg) 0%, #5c5670 100%)",
   "linear-gradient(135deg, #7f7a94 0%, #423d58 100%)",
-  "linear-gradient(135deg, #c9c3d8 0%, #7a7490 100%)",
+  "linear-gradient(135deg, #c9c3d8 0%, var(--sc-muted-fg) 100%)",
   "linear-gradient(135deg, #58536b 0%, #2a2538 100%)",
   "linear-gradient(135deg, #b8b2c8 0%, #6a6578 100%)",
 ];
@@ -952,10 +952,10 @@ export default function Chat({ currentUser, onOpenProfile, initialChat }: ChatPr
         {chatError && (
           <div
             style={{
-              backgroundColor: "#2a1418",
-              border: "1px solid #4a1f28",
-              borderLeft: "4px solid #f87171",
-              color: "#fca5a5",
+              backgroundColor: "var(--sc-danger-bg)",
+              border: "1px solid var(--sc-danger-border)",
+              borderLeft: "4px solid var(--sc-danger-fg)",
+              color: "var(--sc-danger-fg-strong)",
               fontSize: 12,
               lineHeight: 1.5,
               padding: "10px 14px",
@@ -1142,7 +1142,7 @@ export default function Chat({ currentUser, onOpenProfile, initialChat }: ChatPr
                     <div
                       style={{
                         fontSize: 10,
-                        color: isLastRead ? "var(--fg-accent)" : isMe ? "#8a82a8" : "var(--fg-faint)",
+                        color: isLastRead ? "var(--fg-accent)" : isMe ? "var(--sc-muted-fg)" : "var(--fg-faint)",
                         fontWeight: 600,
                         marginTop: 4,
                         padding: "0 4px",
@@ -1155,12 +1155,12 @@ export default function Chat({ currentUser, onOpenProfile, initialChat }: ChatPr
                     >
                       {formatMessageTime(msg.createdAt)}
                       {isMe && msgTime !== 0 && !isRead && (
-                        <Check size={11} color="#8a82a8" />
+                        <Check size={11} color="var(--sc-muted-fg)" />
                       )}
                       {isMe && isRead && (
                         <CheckCheck
                           size={isLastRead ? 13 : 11}
-                          color={isLastRead ? "var(--fg-accent)" : "#8a82a8"}
+                          color={isLastRead ? "var(--fg-accent)" : "var(--sc-muted-fg)"}
                         />
                       )}
                       {isLastRead && (
@@ -1421,10 +1421,10 @@ export default function Chat({ currentUser, onOpenProfile, initialChat }: ChatPr
       {chatError && (
         <div
           style={{
-            backgroundColor: "#2a1418",
-            border: "1px solid #4a1f28",
-            borderLeft: "4px solid #f87171",
-            color: "#fca5a5",
+            backgroundColor: "var(--sc-danger-bg)",
+            border: "1px solid var(--sc-danger-border)",
+            borderLeft: "4px solid var(--sc-danger-fg)",
+            color: "var(--sc-danger-fg-strong)",
             fontSize: 12,
             lineHeight: 1.5,
             padding: "10px 14px",

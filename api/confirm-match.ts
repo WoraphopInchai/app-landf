@@ -17,6 +17,19 @@ export default handleRequest(async (req: VercelRequest, res: VercelResponse) => 
   if (!myPostId || !otherPostId || (action !== "confirm" && action !== "reject")) {
     throw new ApiHttpError(400, "ข้อมูลไม่ครบถ้วน");
   }
+  if (myPostId === otherPostId) {
+    throw new ApiHttpError(400, "คู่แมทต้องเป็นคนละโพสต์");
+  }
+
+  // กันกดรัวเพื่อกินโควตา writes ของ Firestore แผนฟรี (1 ครั้ง = 2 writes + 1)
+  const limiterRef = db().doc(`meta/confirmMatch/users/${uid}`);
+  const limiterSnap = await limiterRef.get();
+  const lastStamp = Number(
+    (limiterSnap.data() as { lastStampAtMs?: number } | undefined)?.lastStampAtMs || 0
+  );
+  if (Date.now() - lastStamp < 5_000) {
+    throw new ApiHttpError(429, "กดถี่เกินไป กรุณารอสักครู่แล้วลองใหม่");
+  }
 
   const now = new Date().toISOString();
   const stamp =
@@ -51,6 +64,16 @@ export default handleRequest(async (req: VercelRequest, res: VercelResponse) => 
       if (!otherSnap.exists) throw new ApiHttpError(404, "ไม่พบโพสต์อีกฝ่าย");
       const other = otherSnap.data() as { matches?: AiMatchRecord[]; nearMatches?: AiMatchRecord[] };
 
+      // อีกฝั่งปฏิเสธคู่นี้ไปแล้ว = ปฏิเสธคู่นั้นถาวร ไม่ให้มายืนยันแทน/กู้คืน
+      if (action === "confirm") {
+        const otherRejected = [...(other.matches || []), ...(other.nearMatches || [])].some(
+          (m) => m.matchedPostId === myPostId && m.rejected
+        );
+        if (otherRejected) {
+          throw new ApiHttpError(409, "อีกฝั่งได้ทำเครื่องหมายว่าไม่ใช่คู่ของกันแล้ว");
+        }
+      }
+
       const stampArr = (arr?: AiMatchRecord[]): AiMatchRecord[] =>
         (arr || []).map((m) =>
           m.matchedPostId === otherPostId ? { ...m, ...stamp } : m
@@ -71,6 +94,7 @@ export default handleRequest(async (req: VercelRequest, res: VercelResponse) => 
         [`aiJudgedAt.${myPostId}`]: now,
       });
     });
+    await limiterRef.set({ lastStampAtMs: Date.now() });
   } catch (err) {
     if (err instanceof ApiHttpError) throw err;
     console.error("[api] confirmAiPair error:", err);

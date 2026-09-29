@@ -1,5 +1,8 @@
 name: Reconcile (AI match sweep)
 
+# ตาข่ายสำรองเท่านั้น — ช่องทางหลักคือ client เรียกตรงเมื่อผู้ใช้เปิดแอป (src/Pages/Home.tsx)
+# GitHub Actions แผนฟรีรัน schedule ได้ไม่แน่นอน (เคยพบห่างกัน 2-9 ชม. และล้ม 19/19 รอบ)
+# จึงห้ามพึ่งพาเป็นตัวหลัก และห้ามใช้ Vercel cron (Hobby จำกัดวันละครั้ง)
 on:
   schedule:
     - cron: "*/10 * * * *"
@@ -12,6 +15,15 @@ jobs:
   reconcile:
     runs-on: ubuntu-latest
     steps:
+      - name: ตรวจว่ามี CRON_SECRET ก่อน
+        env:
+          CRON_SECRET: ${{ secrets.CRON_SECRET }}
+        run: |
+          if [ -z "${CRON_SECRET}" ]; then
+            echo "::error::ไม่ได้ตั้ง secret ชื่อ CRON_SECRET ใน repo — ต้องตั้งให้ตรงกับ Vercel"
+            exit 1
+          fi
+
       - name: Trigger Vercel reconcile API
         env:
           CRON_SECRET: ${{ secrets.CRON_SECRET }}
@@ -22,4 +34,8 @@ jobs:
             https://app-landf.vercel.app/api/reconcile)
           echo "HTTP ${code}"
           cat /tmp/reconcile.json
+          if [ "$code" = "401" ]; then
+            echo "::error::ได้ 401 = CRON_SECRET ไม่ตรงกับที่ตั้งไว้บน Vercel"
+            exit 1
+          fi
           [ "$code" = "200" ] || exit 1

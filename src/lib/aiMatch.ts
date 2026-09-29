@@ -74,15 +74,16 @@ export async function confirmAiPair(
   >("/api/confirm-match", { myPostId, otherPostId, action });
 }
 
-// ปุ่ม "รีเฟรชคู่แนะนำ" — ให้ server สแกนโพสต์ทั้งหมดของผู้ใช้ (กฎฟรี จำกัด 1 ครั้ง/นาที)
+// ปุ่ม "รีเฟรชคู่แนะนำ" — ให้ server สแกนโพสต์ทั้งหมดของผู้ใช้ (กฎฟรี จำกัด 1 ครั้ง/10 นาที)
 export async function runForceRescan(): Promise<{
   postsDone: number;
   totalMatches: number;
+  totalNear: number;
 }> {
-  return post<Record<string, never>, { postsDone: number; totalMatches: number }>(
-    "/api/force-rescan",
-    {}
-  );
+  return post<
+    Record<string, never>,
+    { postsDone: number; totalMatches: number; totalNear: number }
+  >("/api/force-rescan", {});
 }
 
 // กวาดแบ็กกราวด์แบบ fire-and-forget: เรียกตอนเปิดแอป (ล็อกอินแล้ว)

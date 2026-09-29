@@ -26,9 +26,9 @@ export default function ConfirmModal({
   if (!open) return null;
 
   const isDanger = variant === "danger";
-  const btnBg = isDanger ? "#2a1418" : "linear-gradient(135deg, #7c5cfc, #6a4eff)";
-  const btnColor = isDanger ? "#f87171" : "#fff";
-  const btnBorder = isDanger ? "#4a1f28" : "none";
+  const btnBg = isDanger ? "var(--sc-danger-bg)" : "linear-gradient(135deg, #7c5cfc, #6a4eff)";
+  const btnColor = isDanger ? "var(--sc-danger-fg)" : "#fff";
+  const btnBorder = isDanger ? "var(--sc-danger-border)" : "none";
 
   return (
     <div
@@ -98,8 +98,8 @@ export default function ConfirmModal({
               width: 56,
               height: 56,
               borderRadius: 16,
-              backgroundColor: isDanger ? "#2a1418" : "#1a1a2e",
-              border: `1px solid ${isDanger ? "#4a1f28" : "#2d2d5e"}`,
+              backgroundColor: isDanger ? "var(--sc-danger-bg)" : "#1a1a2e",
+              border: `1px solid ${isDanger ? "var(--sc-danger-border)" : "#2d2d5e"}`,
               display: "flex",
               alignItems: "center",
               justifyContent: "center",
@@ -107,7 +107,7 @@ export default function ConfirmModal({
           >
             <AlertTriangle
               size={26}
-              color={isDanger ? "#f87171" : "#7c5cfc"}
+              color={isDanger ? "var(--sc-danger-fg)" : "#7c5cfc"}
             />
           </div>
 

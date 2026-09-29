@@ -51,6 +51,10 @@ const STOPWORDS = [
 ];
 
 // ---------- ตัวช่วย parse/ข้อความ ----------
+// จำนวนโพสต์ฝั่งตรงข้ามสูงสุดที่หนึ่งครั้งจะไปเทียบ — จำกัดไว้เพื่อไม่ให้กินโควตา
+// reads ของ Firestore แผนฟรี (50,000 ครั้ง/วัน) โดยให้เรียงตาม createdAt ใหม่→เก่า
+const CANDIDATE_LIMIT = 25;
+
 export const parseAiJson = (text?: string): Record<string, unknown> | null => {
   if (!text) return null;
   const cleaned = text.replace(/```json|```/gi, "").trim();
@@ -417,13 +421,19 @@ export async function runAiMatchServer(args: {
         .collection("posts")
         .where("itemType", "==", targetType)
         .where("status", "==", "active")
-        .limit(300)
+        .orderBy("createdAt", "desc")
+        .limit(CANDIDATE_LIMIT)
         .get();
       return snap.docs;
     } catch (indexErr) {
       console.warn("[AI] compound query failed, fallback single-field:", indexErr);
       try {
-        const snap = await db.collection("posts").where("status", "==", "active").limit(500).get();
+        const snap = await db
+          .collection("posts")
+          .where("status", "==", "active")
+          .orderBy("createdAt", "desc")
+          .limit(200)
+          .get();
         return snap.docs.filter((d) => (d.data().itemType || "") === targetType);
       } catch (singleErr) {
         console.error("[AI] opposing query failed:", singleErr);
@@ -459,6 +469,10 @@ export async function runAiMatchServer(args: {
     if (m.similarityScore >= MATCH_MIN_SCORE && !m.rejected) settledPairs.add(m.matchedPostId);
   }
   for (const m of existingMatches) {
+    if (m.confirmed) settledPairs.add(m.matchedPostId);
+  }
+  // คู่ที่ผู้ใช้ยืนยันแล้ว (แม้อยู่โซนใกล้เคียง) ถือว่า "ตัดสินแล้ว" ห้ามถูกคิดคะแนนใหม่จนสถานะยืนยันหลุด
+  for (const m of existingNear) {
     if (m.confirmed) settledPairs.add(m.matchedPostId);
   }
 
@@ -509,6 +523,39 @@ export async function runAiMatchServer(args: {
     validNearIds.delete(id);
   }
 
+  // แผนที่คู่เดิม (ทั้ง matches และ nearMatches) ไว้ย้อนสถานะยืนยัน/ปฏิเสธกลับ
+  const priorEntries = new Map<string, AiMatchRecord>();
+  for (const m of [...existingMatches, ...existingNear]) {
+    if (m.rejected || m.matchedPostId === postId) continue;
+    priorEntries.set(m.matchedPostId, m);
+  }
+  const carryStamps = (
+    prior: AiMatchRecord | undefined,
+    entry: AiMatchRecord
+  ): AiMatchRecord => {
+    if (prior && prior.confirmed) {
+      entry.confirmed = true;
+      if (prior.confirmedBy) entry.confirmedBy = prior.confirmedBy;
+      if (prior.confirmedAt) entry.confirmedAt = prior.confirmedAt;
+    }
+    if (prior && prior.rejected) {
+      entry.rejected = true;
+      if (prior.rejectedBy) entry.rejectedBy = prior.rejectedBy;
+      if (prior.rejectedAt) entry.rejectedAt = prior.rejectedAt;
+    }
+    return entry;
+  };
+
+  // stamp ของคู่นี้ตามมุมมองของโพสต์อีกฝั่ง (entry ที่เขาเก็บไว้เกี่ยวกับเรา)
+  // ต้องอ่านจากเอกสารปลายทาง ไม่ใช่จาก priorEntries ของตัวเอง เพราะสองฝั่งอาจไม่ได้
+  // ถูกเขียนพร้อมกันเสมอไป — ถ้าอ่านผิดที่ stamp ที่ผู้ใช้กดไว้จะหายไปเงียบ ๆ
+  const priorMirrorOf = (opp: unknown): AiMatchRecord | undefined => {
+    const o = opp as { matches?: AiMatchRecord[]; nearMatches?: AiMatchRecord[] } | undefined;
+    if (!o) return undefined;
+    const pool = [...(o.matches || []), ...(o.nearMatches || [])];
+    return pool.find((m) => m.matchedPostId === postId);
+  };
+
   const softBlockedIds = new Set<string>();
   for (const r of ranked) {
     if (!isCategoryConflict(String(post.category || ""), String(r.target.category || ""))) continue;
@@ -556,60 +603,52 @@ export async function runAiMatchServer(args: {
     const gatePassed = score >= MATCH_MIN_SCORE && rs.ev.hasEvidence;
 
     if (gatePassed) {
-      const entry: AiMatchRecord = {
+      const entry: AiMatchRecord = carryStamps(priorEntries.get(docSnap.id), {
         matchedPostId: docSnap.id,
         matchedTitle: String(t.title || ""),
         similarityScore: score,
         reason,
-      };
+      });
       matches.set(docSnap.id, entry);
       nearMatches.delete(docSnap.id);
       validMatchIds.add(docSnap.id);
       validNearIds.delete(docSnap.id);
-      const mirror = {
+      const mirror = carryStamps(priorMirrorOf(t) ?? priorEntries.get(docSnap.id), {
         matchedPostId: postId,
         matchedTitle: String(post.title || ""),
         similarityScore: score,
         reason,
-      };
+      });
       const oppData = { ...t };
       const updated = upsertMirror(oppData, "matches", mirror);
-      toMirror.push({
-        docId: docSnap.id,
-        data: { ...updated, aiJudgedAt: { ...((t.aiJudgedAt as Record<string, string>) || {}), [postId]: new Date(nowPair).toISOString() } },
-      });
+      toMirror.push({ docId: docSnap.id, data: updated });
     } else if (score >= NEAR_MATCH_MIN_SCORE) {
-      const nearEntry: AiMatchRecord = {
+      const nearEntry: AiMatchRecord = carryStamps(priorEntries.get(docSnap.id), {
         matchedPostId: docSnap.id,
         matchedTitle: String(t.title || ""),
         similarityScore: score,
         reason,
-      };
+      });
       nearMatches.set(docSnap.id, nearEntry);
       matches.delete(docSnap.id);
       validNearIds.add(docSnap.id);
       validMatchIds.delete(docSnap.id);
-      const nearMirror = {
+      const nearMirror = carryStamps(priorMirrorOf(t) ?? priorEntries.get(docSnap.id), {
         matchedPostId: postId,
         matchedTitle: String(post.title || ""),
         similarityScore: score,
         reason,
-      };
+      });
       const oppData = { ...t };
       const updated = upsertMirror(oppData, "nearMatches", nearMirror);
-      toMirror.push({
-        docId: docSnap.id,
-        data: { ...updated, aiJudgedAt: { ...((t.aiJudgedAt as Record<string, string>) || {}), [postId]: new Date(nowPair).toISOString() } },
-      });
+      toMirror.push({ docId: docSnap.id, data: updated });
     } else {
       matches.delete(docSnap.id);
       nearMatches.delete(docSnap.id);
       validMatchIds.delete(docSnap.id);
       validNearIds.delete(docSnap.id);
-      toMirror.push({
-        docId: docSnap.id,
-        data: { aiJudgedAt: { ...((t.aiJudgedAt as Record<string, string>) || {}), [postId]: new Date(nowPair).toISOString() } },
-      });
+      // คู่นี้ไม่ผ่านเกณฑ์และไม่เคยมีแมทอยู่แล้ว จึงไม่ต้องเขียนอะไรลงโพสต์คนอื่น
+      // (เดิมเขียน aiJudgedAt ลงทุกคู่ที่ต่ำกว่า 45 = สูงสุด 300 writes ต่อโพสต์)
     }
   }
 

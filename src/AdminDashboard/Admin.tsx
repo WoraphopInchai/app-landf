@@ -164,11 +164,11 @@ const formatClockTime = (ts?: FirestoreTimeLike): string => {
 };
 
 const getStatusBadge = (c: AdminClaim) => {
-  if (c.status === "approved") return { label: "ส่งมอบแล้ว", bg: "#0f2a1f", color: "#34d399" };
-  if (c.status === "rejected") return { label: "ถูกปฏิเสธ", bg: "#2a1418", color: "#f87171" };
-  if (c.status === "expired") return { label: "หมดอายุแล้ว", bg: "#1c1a24", color: "var(--fg-secondary)" };
-  if (c.status === "post_deleted") return { label: "โพสต์ถูกลบ", bg: "#1c1a24", color: "var(--fg-faint)" };
-  return { label: "รอตรวจสอบ", bg: "#2a1a10", color: "#fbbf24" };
+  if (c.status === "approved") return { label: "ส่งมอบแล้ว", bg: "var(--sc-ok-bg)", color: "var(--sc-ok-fg)" };
+  if (c.status === "rejected") return { label: "ถูกปฏิเสธ", bg: "var(--sc-danger-bg)", color: "var(--sc-danger-fg)" };
+  if (c.status === "expired") return { label: "หมดอายุแล้ว", bg: "var(--sc-muted-bg)", color: "var(--fg-secondary)" };
+  if (c.status === "post_deleted") return { label: "โพสต์ถูกลบ", bg: "var(--sc-muted-bg)", color: "var(--fg-faint)" };
+  return { label: "รอตรวจสอบ", bg: "var(--sc-warn-bg)", color: "var(--sc-warn-fg)" };
 };
 
 // ปิดคำขอรับของ pending ทั้งหมดของโพสต์ที่ถูกลบ + แจ้งเตือนผู้ขอดแต่ละราย
@@ -275,9 +275,9 @@ const REPORT_KIND_META: Record<
   "post_report" | "claim_dispute" | "support_message",
   { label: string; color: string; bg: string }
 > = {
-  post_report: { label: "รายงานโพสต์", color: "#fb923c", bg: "#2a1a10" },
-  claim_dispute: { label: "แจ้งสวมสิทธิ์", color: "#f87171", bg: "#2a1418" },
-  support_message: { label: "ติดต่อแอดมิน", color: "#a78bfa", bg: "#1c1626" },
+  post_report: { label: "รายงานโพสต์", color: "var(--sc-warn-fg)", bg: "var(--sc-warn-bg)" },
+  claim_dispute: { label: "แจ้งสวมสิทธิ์", color: "var(--sc-danger-fg)", bg: "var(--sc-danger-bg)" },
+  support_message: { label: "ติดต่อแอดมิน", color: "var(--sc-brand-fg)", bg: "var(--sc-brand-bg)" },
 };
 
 // แจ้งผลการจัดการกลับผู้รายงาน
@@ -537,20 +537,20 @@ export default function Admin({ currentUser, onLogout, initialTab, adminRole, ad
 
   const allTabs: { id: AdminTab; label: string; icon: LucideIcon; color: string }[] = [
     { id: "overview", label: "ภาพรวม", icon: BarChart3, color: "var(--fg-accent)" },
-    { id: "found", label: "รับโพสต์ของพบ", icon: PackageSearch, color: "#fbbf24" },
-    { id: "claims", label: "คำขอรับของ", icon: ClipboardCheck, color: "#fbbf24" },
-    { id: "history", label: "ประวัติ", icon: History, color: "#a78bfa" },
+    { id: "found", label: "รับโพสต์ของพบ", icon: PackageSearch, color: "var(--sc-warn-fg)" },
+    { id: "claims", label: "คำขอรับของ", icon: ClipboardCheck, color: "var(--sc-warn-fg)" },
+    { id: "history", label: "ประวัติ", icon: History, color: "var(--sc-brand-fg)" },
   ];
   // เจ้าหน้าที่ประจำจุด: จัดการโพสต์เฉพาะจุดของตัวเอง
   if (isStaff) {
-    allTabs.push({ id: "posts", label: "จัดการโพสต์", icon: FileText, color: "#60a5fa" });
+    allTabs.push({ id: "posts", label: "จัดการโพสต์", icon: FileText, color: "var(--sc-info-fg)" });
   }
   // เฉพาะหัวหน้าแอดมิน: จัดการโพสต์/รายงาน/ผู้ใช้/เจ้าหน้าที่-จุดคืน
   if (isSuper) {
     allTabs.push(
-      { id: "posts", label: "จัดการโพสต์", icon: FileText, color: "#60a5fa" },
-      { id: "reports", label: "รายงาน", icon: Flag, color: "#f87171" },
-      { id: "users", label: "จัดการผู้ใช้", icon: Users, color: "#34d399" },
+      { id: "posts", label: "จัดการโพสต์", icon: FileText, color: "var(--sc-info-fg)" },
+      { id: "reports", label: "รายงาน", icon: Flag, color: "var(--sc-danger-fg)" },
+      { id: "users", label: "จัดการผู้ใช้", icon: Users, color: "var(--sc-ok-fg)" },
       { id: "manage-admins", label: "จัดการแอดมิน", icon: ShieldCheck, color: "#7c5cfc" }
     );
   }
@@ -612,9 +612,9 @@ export default function Admin({ currentUser, onLogout, initialTab, adminRole, ad
               padding: "0 12px",
               borderRadius: "10px",
               flexShrink: 0,
-              border: "1px solid #1e3a5f",
-              background: "#12233a",
-              color: "#7cc4ff",
+              border: "1px solid var(--sc-info-border)",
+              background: "var(--sc-info-bg)",
+              color: "var(--sc-info-fg)",
             }}
           >
             <MapPin size={15} />
@@ -639,8 +639,8 @@ export default function Admin({ currentUser, onLogout, initialTab, adminRole, ad
         <button onClick={onLogout} title="ออกจากระบบ" style={{
           display: "flex", alignItems: "center", gap: "7px",
           height: "36px", padding: "0 14px", borderRadius: "10px", flexShrink: 0,
-          border: "1px solid #4a1f28", background: "#2a1418",
-          color: "#f87171", fontSize: "12.5px", fontWeight: 700, cursor: "pointer",
+          border: "1px solid var(--sc-danger-border)", background: "var(--sc-danger-bg)",
+          color: "var(--sc-danger-fg)", fontSize: "12.5px", fontWeight: 700, cursor: "pointer",
           boxShadow: "0 2px 8px rgba(0,0,0,0.25)",
           transition: "all 0.15s ease",
         }}>
@@ -674,7 +674,7 @@ export default function Admin({ currentUser, onLogout, initialTab, adminRole, ad
               {tab.id === "found" && pendingFoundCount > 0 && (
                 <span style={{
                   minWidth: "16px", height: "16px", padding: "0 4px", borderRadius: "999px",
-                  backgroundColor: "#fbbf24", color: "#1a1208", fontSize: "10px", fontWeight: 800,
+                  backgroundColor: "var(--sc-warn-fg)", color: "#1a1208", fontSize: "10px", fontWeight: 800,
                   display: "inline-flex", alignItems: "center", justifyContent: "center",
                 }}>
                   {pendingFoundCount > 99 ? "99+" : pendingFoundCount}
@@ -683,7 +683,7 @@ export default function Admin({ currentUser, onLogout, initialTab, adminRole, ad
               {tab.id === "claims" && pendingClaimsCount > 0 && (
                 <span style={{
                   minWidth: "16px", height: "16px", padding: "0 4px", borderRadius: "999px",
-                  backgroundColor: "#60a5fa", color: "#0b1526", fontSize: "10px", fontWeight: 800,
+                  backgroundColor: "var(--sc-info-fg)", color: "#0b1526", fontSize: "10px", fontWeight: 800,
                   display: "inline-flex", alignItems: "center", justifyContent: "center",
                 }}>
                   {pendingClaimsCount > 99 ? "99+" : pendingClaimsCount}
@@ -692,7 +692,7 @@ export default function Admin({ currentUser, onLogout, initialTab, adminRole, ad
               {tab.id === "reports" && openReportsCount > 0 && (
                 <span style={{
                   minWidth: "16px", height: "16px", padding: "0 4px", borderRadius: "999px",
-                  backgroundColor: "#f87171", color: "#241012", fontSize: "10px", fontWeight: 800,
+                  backgroundColor: "var(--sc-danger-fg)", color: "#241012", fontSize: "10px", fontWeight: 800,
                   display: "inline-flex", alignItems: "center", justifyContent: "center",
                 }}>
                   {openReportsCount > 99 ? "99+" : openReportsCount}
@@ -707,7 +707,7 @@ export default function Admin({ currentUser, onLogout, initialTab, adminRole, ad
       <div style={{ flex: 1, overflowY: "auto", padding: "16px" }}>
         {isStaff && !adminPoint ? (
           <div style={{ textAlign: "center", padding: "60px 20px", color: "var(--fg-muted)" }}>
-            <MapPin size={32} color="#7cc4ff" style={{ marginBottom: "12px" }} />
+            <MapPin size={32} color="var(--sc-info-fg)" style={{ marginBottom: "12px" }} />
             <div style={{ fontSize: "13px", fontWeight: 600 }}>
               ยังไม่ได้รับมอบหมายจุดคืน กรุณาติดต่อหัวหน้าแอดมิน
             </div>
@@ -720,7 +720,7 @@ export default function Admin({ currentUser, onLogout, initialTab, adminRole, ad
           </div>
         ) : dataError ? (
           <div style={{ textAlign: "center", padding: "60px 20px", color: "var(--fg-muted)" }}>
-            <AlertTriangle size={32} color="#f87171" style={{ marginBottom: "12px" }} />
+            <AlertTriangle size={32} color="var(--sc-danger-fg)" style={{ marginBottom: "12px" }} />
             <div style={{ fontSize: "13px", fontWeight: 600 }}>{dataError}</div>
           </div>
         ) : (
@@ -828,18 +828,18 @@ function AdminOverview({
   const bannedUsers = isSuper ? users.filter((u) => u.banned).length : 0;
 
   const stats = [
-    { label: "ของค้าง", value: unresolvedPosts.length, icon: Clock, color: "#fb923c", bg: "#2a1a10" },
-    { label: "กำลังดำเนินการ", value: inProgressPosts, icon: Activity, color: "#60a5fa", bg: "#172036" },
-    { label: "ของหาย", value: lostPosts, icon: AlertTriangle, color: "#fb923c", bg: "#2a1a10" },
-    { label: "พบของ", value: foundPosts, icon: PackageCheck, color: "#34d399", bg: "#0f2a1f" },
-    { label: "คืนสำเร็จ", value: resolvedPosts, icon: CheckCircle2, color: "#34d399", bg: "#0f2a1f" },
+    { label: "ของค้าง", value: unresolvedPosts.length, icon: Clock, color: "var(--sc-warn-fg)", bg: "var(--sc-warn-bg)" },
+    { label: "กำลังดำเนินการ", value: inProgressPosts, icon: Activity, color: "var(--sc-info-fg)", bg: "var(--sc-info-bg)" },
+    { label: "ของหาย", value: lostPosts, icon: AlertTriangle, color: "var(--sc-warn-fg)", bg: "var(--sc-warn-bg)" },
+    { label: "พบของ", value: foundPosts, icon: PackageCheck, color: "var(--sc-ok-fg)", bg: "var(--sc-ok-bg)" },
+    { label: "คืนสำเร็จ", value: resolvedPosts, icon: CheckCircle2, color: "var(--sc-ok-fg)", bg: "var(--sc-ok-bg)" },
   ];
   if (isSuper) {
     stats.push(
       { label: "โพสต์ทั้งหมด", value: totalPosts, icon: FileText, color: "var(--fg-accent)", bg: "var(--bg-hover)" },
-      { label: "รายงานค้าง", value: openReports, icon: Flag, color: "#f87171", bg: "#2a1418" },
-      { label: "ผู้ใช้งานทั้งหมด", value: totalUsers, icon: Users, color: "#60a5fa", bg: "#172036" },
-      { label: "ผู้ใช้ที่ถูกแบน", value: bannedUsers, icon: UserX, color: "#f87171", bg: "#2a1418" }
+      { label: "รายงานค้าง", value: openReports, icon: Flag, color: "var(--sc-danger-fg)", bg: "var(--sc-danger-bg)" },
+      { label: "ผู้ใช้งานทั้งหมด", value: totalUsers, icon: Users, color: "var(--sc-info-fg)", bg: "var(--sc-info-bg)" },
+      { label: "ผู้ใช้ที่ถูกแบน", value: bannedUsers, icon: UserX, color: "var(--sc-danger-fg)", bg: "var(--sc-danger-bg)" }
     );
   }
 
@@ -884,8 +884,8 @@ function AdminOverview({
         </div>
         <div style={{ display: "grid", gridTemplateColumns: "repeat(2, 1fr)", gap: "10px" }}>
           {[
-            { label: "โพสต์ของพบรออนุมัติ", value: pendingFoundPosts, icon: PackageSearch, color: "#fbbf24", bg: "#2a1a10", tab: "found" as AdminTab },
-            { label: "คำขอเคลมรออนุมัติ", value: pendingClaims, icon: ClipboardCheck, color: "#60a5fa", bg: "#172036", tab: "claims" as AdminTab },
+            { label: "โพสต์ของพบรออนุมัติ", value: pendingFoundPosts, icon: PackageSearch, color: "var(--sc-warn-fg)", bg: "var(--sc-warn-bg)", tab: "found" as AdminTab },
+            { label: "คำขอเคลมรออนุมัติ", value: pendingClaims, icon: ClipboardCheck, color: "var(--sc-info-fg)", bg: "var(--sc-info-bg)", tab: "claims" as AdminTab },
           ].map((c) => {
             const Icon = c.icon;
             const clickable = clickableHint;
@@ -974,7 +974,7 @@ function AdminOverview({
           fontSize: "14px", fontWeight: 800, color: "var(--fg)", marginBottom: "12px",
           display: "flex", alignItems: "center", gap: "8px",
         }}>
-          <Clock size={16} color="#fbbf24" /> ของค้างเกิน {agingDays} วัน
+          <Clock size={16} color="var(--sc-warn-fg)" /> ของค้างเกิน {agingDays} วัน
         </div>
         {agedPosts.length === 0 ? (
           <div style={{ fontSize: "12px", color: "var(--fg-faint)", padding: "8px 0" }}>
@@ -993,7 +993,7 @@ function AdminOverview({
             >
               <div style={{
                 width: "8px", height: "8px", borderRadius: "50%", flexShrink: 0,
-                backgroundColor: post.itemType === "lost" ? "#fb923c" : "#34d399",
+                backgroundColor: post.itemType === "lost" ? "var(--sc-warn-fg)" : "var(--sc-ok-fg)",
               }} />
               <div style={{ flex: 1, minWidth: 0 }}>
                 <div style={{ fontSize: "12px", fontWeight: 700, color: "var(--fg-strong)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
@@ -1005,8 +1005,8 @@ function AdminOverview({
               </div>
               <span style={{
                 fontSize: "10px", fontWeight: 800, padding: "3px 8px", borderRadius: "6px",
-                backgroundColor: "#2a1a10", color: "#fb923c",
-                border: "1px solid #4a3418", whiteSpace: "nowrap",
+                backgroundColor: "var(--sc-warn-bg)", color: "var(--sc-warn-fg)",
+                border: "1px solid var(--sc-warn-border)", whiteSpace: "nowrap",
               }}>
                 {days} วัน
               </span>
@@ -1030,10 +1030,10 @@ function AdminOverview({
           }}>
             <div style={{
               width: "8px", height: "8px", borderRadius: "50%", flexShrink: 0,
-              backgroundColor: post.status === "resolved" ? "#34d399"
-                : post.status === "under_investigation" ? "#f87171"
-                : post.status === "in_progress" ? "#60a5fa"
-                : post.itemType === "lost" ? "#fb923c" : "#34d399",
+              backgroundColor: post.status === "resolved" ? "var(--sc-ok-fg)"
+                : post.status === "under_investigation" ? "var(--sc-danger-fg)"
+                : post.status === "in_progress" ? "var(--sc-info-fg)"
+                : post.itemType === "lost" ? "var(--sc-warn-fg)" : "var(--sc-ok-fg)",
             }} />
             <div style={{ flex: 1, minWidth: 0 }}>
               <div style={{ fontSize: "12px", fontWeight: 700, color: "var(--fg-strong)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
@@ -1045,8 +1045,8 @@ function AdminOverview({
             </div>
             <span style={{
               fontSize: "10px", fontWeight: 700, padding: "3px 8px", borderRadius: "6px",
-              backgroundColor: post.itemType === "lost" ? "#2a1a10" : "#0f2a1f",
-              color: post.itemType === "lost" ? "#fb923c" : "#34d399",
+              backgroundColor: post.itemType === "lost" ? "var(--sc-warn-bg)" : "var(--sc-ok-bg)",
+              color: post.itemType === "lost" ? "var(--sc-warn-fg)" : "var(--sc-ok-fg)",
               border: "1px solid var(--border)",
             }}>
               {post.itemType === "lost" ? "หาย" : "พบ"}
@@ -1148,8 +1148,8 @@ function AdminFoundApprovals({
     <div style={{ display: "flex", flexDirection: "column", gap: "12px" }}>
       <div style={{
         display: "flex", alignItems: "center", gap: "8px",
-        padding: "10px 12px", backgroundColor: "#2a1a10", border: "1px solid #4a3418",
-        borderRadius: "10px", fontSize: "12px", color: "#fbbf24",
+        padding: "10px 12px", backgroundColor: "var(--sc-warn-bg)", border: "1px solid var(--sc-warn-border)",
+        borderRadius: "10px", fontSize: "12px", color: "var(--sc-warn-fg)",
       }}>
         <PackageSearch size={14} />
         มีคำขอโพสต์ของพบรอตรวจรับ <strong>{pending.length}</strong> รายการ · รับของจริงที่จุดรับแล้วจึงกด "อนุมัติโพสต์"
@@ -1169,7 +1169,7 @@ function AdminFoundApprovals({
         pending.map((post) => (
           <div key={post.id} style={{
             backgroundColor: "var(--bg-card)", borderRadius: "14px", padding: "14px",
-            border: "1px solid #4a3418", boxShadow: "0 2px 8px rgba(0,0,0,0.3)",
+            border: "1px solid var(--sc-warn-border)", boxShadow: "0 2px 8px rgba(0,0,0,0.3)",
           }}>
             <div style={{ display: "flex", gap: "12px" }}>
               {post.imageUrl ? (
@@ -1180,7 +1180,7 @@ function AdminFoundApprovals({
               ) : (
                 <div style={{
                   width: "64px", height: "64px", borderRadius: "10px", flexShrink: 0,
-                  backgroundColor: "#2a1a10", color: "#fbbf24",
+                  backgroundColor: "var(--sc-warn-bg)", color: "var(--sc-warn-fg)",
                   display: "flex", alignItems: "center", justifyContent: "center",
                 }}>
                   <PackageSearch size={24} />
@@ -1209,15 +1209,15 @@ function AdminFoundApprovals({
             </div>
             <div style={{ display: "flex", gap: "8px", marginTop: "12px" }}>
               <button onClick={() => handleApprove(post)} style={{
-                flex: 1, padding: "10px", borderRadius: "10px", border: "1px solid #1f4a35",
-                backgroundColor: "#0f2a1f", color: "#34d399", fontSize: "12px", fontWeight: 700,
+                flex: 1, padding: "10px", borderRadius: "10px", border: "1px solid var(--sc-ok-border)",
+                backgroundColor: "var(--sc-ok-bg)", color: "var(--sc-ok-fg)", fontSize: "12px", fontWeight: 700,
                 cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", gap: "5px",
               }}>
                 <CheckCircle2 size={14} /> ตรวจรับแล้ว อนุมัติโพสต์
               </button>
               <button onClick={() => handleReject(post)} style={{
-                flex: 1, padding: "10px", borderRadius: "10px", border: "1px solid #4a1f28",
-                backgroundColor: "#2a1418", color: "#f87171", fontSize: "12px", fontWeight: 700,
+                flex: 1, padding: "10px", borderRadius: "10px", border: "1px solid var(--sc-danger-border)",
+                backgroundColor: "var(--sc-danger-bg)", color: "var(--sc-danger-fg)", fontSize: "12px", fontWeight: 700,
                 cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", gap: "5px",
               }}>
                 <XCircle size={14} /> ปฏิเสธ
@@ -1582,9 +1582,9 @@ function AdminClaims({
       </div>
 
       {/* Summary */}
-      <div style={{ display: "flex", gap: "8px", padding: "12px", backgroundColor: "#2a1a10", border: "1px solid #4a3418", borderRadius: "12px" }}>
-        <ClipboardCheck size={16} color="#fbbf24" style={{ flexShrink: 0, marginTop: "1px" }} />
-        <div style={{ fontSize: "12px", color: "#fcd34d", lineHeight: 1.5 }}>
+      <div style={{ display: "flex", gap: "8px", padding: "12px", backgroundColor: "var(--sc-warn-bg)", border: "1px solid var(--sc-warn-border)", borderRadius: "12px" }}>
+        <ClipboardCheck size={16} color="var(--sc-warn-fg)" style={{ flexShrink: 0, marginTop: "1px" }} />
+        <div style={{ fontSize: "12px", color: "var(--sc-warn-fg-strong)", lineHeight: 1.5 }}>
           กำลังรออนุมัติ <strong>{filtered.length}</strong> รายการ
         </div>
       </div>
@@ -1602,7 +1602,7 @@ function AdminClaims({
           return (
             <div key={claim.id} style={{
               backgroundColor: "var(--bg-card)", borderRadius: "14px", overflow: "hidden",
-              border: claim.status === "pending" ? "1.5px solid #4a3418" : "1px solid var(--border)",
+              border: claim.status === "pending" ? "1.5px solid var(--sc-warn-border)" : "1px solid var(--border)",
               boxShadow: "0 2px 8px rgba(0,0,0,0.3)",
             }}>
               {/* Claim Header */}
@@ -1640,9 +1640,9 @@ function AdminClaims({
                     </span>
                     <span style={{
                       fontSize: "10px", fontWeight: 700, padding: "2px 8px", borderRadius: "6px",
-                      backgroundColor: claim.claimType === "student" ? "#172036" : "#2a1a10",
-                      color: claim.claimType === "student" ? "#60a5fa" : "#fbbf24",
-                      border: `1px solid ${claim.claimType === "student" ? "#2a3a5c" : "#4a3418"}`,
+                      backgroundColor: claim.claimType === "student" ? "var(--sc-info-bg)" : "var(--sc-warn-bg)",
+                      color: claim.claimType === "student" ? "var(--sc-info-fg)" : "var(--sc-warn-fg)",
+                      border: `1px solid ${claim.claimType === "student" ? "var(--sc-info-border)" : "var(--sc-warn-border)"}`,
                     }}>
                       {claim.claimType === "student" ? "นิสิต" : "บุคคลทั่วไป"}
                     </span>
@@ -1651,7 +1651,7 @@ function AdminClaims({
                     ผู้ขอ: <strong>{claim.claimantName}</strong> · {formatTime(claim.createdAt)}
                   </div>
                   {claim.status === "pending" && claim.expiresAt && (
-                    <div style={{ fontSize: "11px", color: claim.pickupDate ? "#fcd34d" : "#60a5fa", marginTop: "2px" }}>
+                    <div style={{ fontSize: "11px", color: claim.pickupDate ? "var(--sc-warn-fg-strong)" : "var(--sc-info-fg)", marginTop: "2px" }}>
                       {claim.pickupDate
                         ? <>นัดรับ: {formatTime(claim.expiresAt)}</>
                         : <>หมดอายุใน: {formatTime(claim.expiresAt)}</>}
@@ -1659,11 +1659,11 @@ function AdminClaims({
                   )}
                   {claim.studentId && (
                     <div style={{ fontSize: "11px", color: "var(--fg-secondary)", marginTop: "2px" }}>
-                      รหัสนิสิต: <strong style={{ color: "#60a5fa" }}>{claim.studentId}</strong>
+                      รหัสนิสิต: <strong style={{ color: "var(--sc-info-fg)" }}>{claim.studentId}</strong>
                     </div>
                   )}
                   {((claim.phone || claim.contact) && (claim.phone || claim.contact) !== "ไม่ระบุช่องทางติดต่อ") && (
-                    <div style={{ fontSize: "11px", color: "#60a5fa", marginTop: "2px" }}>
+                    <div style={{ fontSize: "11px", color: "var(--sc-info-fg)", marginTop: "2px" }}>
                       โทร: {claim.phone || claim.contact}
                     </div>
                   )}
@@ -1720,16 +1720,16 @@ function AdminClaims({
                 {claim.status === "pending" && (
                   <>
                     <button onClick={() => handleApprove(claim)} disabled={isProcessing} style={{
-                      flex: 1, padding: "9px", borderRadius: "8px", border: "1px solid #1f4a35",
-                      backgroundColor: "#0f2a1f", color: "#34d399", fontSize: "12px", fontWeight: 700,
+                      flex: 1, padding: "9px", borderRadius: "8px", border: "1px solid var(--sc-ok-border)",
+                      backgroundColor: "var(--sc-ok-bg)", color: "var(--sc-ok-fg)", fontSize: "12px", fontWeight: 700,
                       cursor: isProcessing ? "not-allowed" : "pointer",
                       display: "flex", alignItems: "center", justifyContent: "center", gap: "5px",
                     }}>
                       <CheckCircle2 size={14} /> ยืนยันส่งมอบ
                     </button>
                     <button onClick={() => handleReject(claim)} disabled={isProcessing} style={{
-                      flex: 1, padding: "9px", borderRadius: "8px", border: "1px solid #4a1f28",
-                      backgroundColor: "#2a1418", color: "#f87171", fontSize: "12px", fontWeight: 700,
+                      flex: 1, padding: "9px", borderRadius: "8px", border: "1px solid var(--sc-danger-border)",
+                      backgroundColor: "var(--sc-danger-bg)", color: "var(--sc-danger-fg)", fontSize: "12px", fontWeight: 700,
                       cursor: isProcessing ? "not-allowed" : "pointer",
                       display: "flex", alignItems: "center", justifyContent: "center", gap: "5px",
                     }}>
@@ -1808,10 +1808,10 @@ function AdminClaims({
             </button>
 
             {[
-              { icon: User, label: "ผู้ขอรับของ", value: selectedClaim.claimantName || "-", color: "#60a5fa", bg: "#172036" },
-              { icon: GraduationCap, label: "ประเภทผู้ขอ", value: selectedClaim.claimType === "student" ? "นิสิต" : "บุคคลทั่วไป", color: selectedClaim.claimType === "student" ? "#60a5fa" : "#fbbf24", bg: selectedClaim.claimType === "student" ? "#172036" : "#2a1a10" },
-              { icon: Clock, label: "ส่งคำขอเมื่อ", value: formatTime(selectedClaim.createdAt) || "-", color: "#fbbf24", bg: "#2a1a10" },
-              { icon: MapPin, label: "สถานะ", value: getStatusBadge(selectedClaim).label, color: "#34d399", bg: "#0f2a1f" },
+              { icon: User, label: "ผู้ขอรับของ", value: selectedClaim.claimantName || "-", color: "var(--sc-info-fg)", bg: "var(--sc-info-bg)" },
+              { icon: GraduationCap, label: "ประเภทผู้ขอ", value: selectedClaim.claimType === "student" ? "นิสิต" : "บุคคลทั่วไป", color: selectedClaim.claimType === "student" ? "var(--sc-info-fg)" : "var(--sc-warn-fg)", bg: selectedClaim.claimType === "student" ? "var(--sc-info-bg)" : "var(--sc-warn-bg)" },
+              { icon: Clock, label: "ส่งคำขอเมื่อ", value: formatTime(selectedClaim.createdAt) || "-", color: "var(--sc-warn-fg)", bg: "var(--sc-warn-bg)" },
+              { icon: MapPin, label: "สถานะ", value: getStatusBadge(selectedClaim).label, color: "var(--sc-ok-fg)", bg: "var(--sc-ok-bg)" },
             ].map((row, i) => (
               <div key={i} style={{
                 display: "flex", alignItems: "center", gap: "10px",
@@ -1829,9 +1829,9 @@ function AdminClaims({
             {selectedClaim.studentId && (
               <div style={{
                 display: "flex", alignItems: "center", gap: "10px",
-                padding: "10px 12px", borderRadius: "10px", backgroundColor: "#172036", marginBottom: "8px",
+                padding: "10px 12px", borderRadius: "10px", backgroundColor: "var(--sc-info-bg)", marginBottom: "8px",
               }}>
-                <IdCard size={16} color="#60a5fa" />
+                <IdCard size={16} color="var(--sc-info-fg)" />
                 <div>
                   <div style={{ fontSize: "10px", color: "var(--fg-muted)", fontWeight: 600 }}>รหัสนิสิต</div>
                   <div style={{ fontSize: "12px", fontWeight: 700, color: "var(--fg-strong)" }}>{selectedClaim.studentId}</div>
@@ -2080,9 +2080,9 @@ function AdminHistory({
       </div>
 
       {/* Summary */}
-      <div style={{ display: "flex", gap: "8px", padding: "12px", backgroundColor: "#1c1a24", border: "1px solid #3a3350", borderRadius: "12px" }}>
-        <History size={16} color="#a78bfa" style={{ flexShrink: 0, marginTop: "1px" }} />
-        <div style={{ fontSize: "12px", color: "#c4b5fd", lineHeight: 1.5 }}>
+      <div style={{ display: "flex", gap: "8px", padding: "12px", backgroundColor: "var(--sc-muted-bg)", border: "1px solid var(--sc-muted-border)", borderRadius: "12px" }}>
+        <History size={16} color="var(--sc-brand-fg)" style={{ flexShrink: 0, marginTop: "1px" }} />
+        <div style={{ fontSize: "12px", color: "var(--sc-brand-fg)", lineHeight: 1.5 }}>
           ประวัติรายการที่จบแล้วทั้งหมด <strong>{filtered.length}</strong> รายการ
         </div>
       </div>
@@ -2127,22 +2127,22 @@ function AdminHistory({
                     </span>
                     <span style={{
                       fontSize: "10px", fontWeight: 700, padding: "2px 8px", borderRadius: "6px",
-                      backgroundColor: claim.claimType === "student" ? "#172036" : "#2a1a10",
-                      color: claim.claimType === "student" ? "#60a5fa" : "#fbbf24",
-                      border: `1px solid ${claim.claimType === "student" ? "#2a3a5c" : "#4a3418"}`,
+                      backgroundColor: claim.claimType === "student" ? "var(--sc-info-bg)" : "var(--sc-warn-bg)",
+                      color: claim.claimType === "student" ? "var(--sc-info-fg)" : "var(--sc-warn-fg)",
+                      border: `1px solid ${claim.claimType === "student" ? "var(--sc-info-border)" : "var(--sc-warn-border)"}`,
                     }}>
                       {claim.claimType === "student" ? "นิสิต" : "บุคคลทั่วไป"}
                     </span>
                   </div>
                   <div style={{ fontSize: "11px", color: "var(--fg-secondary)", lineHeight: 1.6 }}>
                     ผู้ขอ: <strong>{claim.claimantName}</strong>{" "}
-                    {claim.studentId && <>(รหัส <strong style={{ color: "#60a5fa" }}>{claim.studentId}</strong>)</>}
+                    {claim.studentId && <>(รหัส <strong style={{ color: "var(--sc-info-fg)" }}>{claim.studentId}</strong>)</>}
                   </div>
                   <div style={{ fontSize: "11px", color: "var(--fg-secondary)", lineHeight: 1.6 }}>
                     ยื่นเมื่อ: {formatTime(claim.createdAt)} · จบเมื่อ: {closedAt ? formatTime(claim.reviewedAt) : "-"}
                   </div>
                   {(claim.phone || claim.contact) && (claim.phone || claim.contact) !== "ไม่ระบุช่องทางติดต่อ" && (
-                    <div style={{ fontSize: "11px", color: "#60a5fa", marginTop: "2px" }}>
+                    <div style={{ fontSize: "11px", color: "var(--sc-info-fg)", marginTop: "2px" }}>
                       โทร: {claim.phone || claim.contact}
                     </div>
                   )}
@@ -2206,11 +2206,11 @@ function AdminHistory({
             </div>
 
             {[
-              { icon: User, label: "ผู้ขอรับของ", value: selected.claimantName || "-", color: "#60a5fa", bg: "#172036" },
-              { icon: GraduationCap, label: "ประเภทผู้ขอ", value: selected.claimType === "student" ? "นิสิต" : "บุคคลทั่วไป", color: selected.claimType === "student" ? "#60a5fa" : "#fbbf24", bg: selected.claimType === "student" ? "#172036" : "#2a1a10" },
-              { icon: Clock, label: "ยื่นคำขอเมื่อ", value: formatTime(selected.createdAt) || "-", color: "#fbbf24", bg: "#2a1a10" },
-              { icon: CheckCircle2, label: "สถานะ", value: getStatusBadge(selected).label, color: "#34d399", bg: "#0f2a1f" },
-              { icon: Clock, label: "จบ (ส่งมอบ/ปิด) เมื่อ", value: resolveTime(selected.reviewedAt) ? formatTime(selected.reviewedAt) : "-", color: "#a78bfa", bg: "#1c1a24" },
+              { icon: User, label: "ผู้ขอรับของ", value: selected.claimantName || "-", color: "var(--sc-info-fg)", bg: "var(--sc-info-bg)" },
+              { icon: GraduationCap, label: "ประเภทผู้ขอ", value: selected.claimType === "student" ? "นิสิต" : "บุคคลทั่วไป", color: selected.claimType === "student" ? "var(--sc-info-fg)" : "var(--sc-warn-fg)", bg: selected.claimType === "student" ? "var(--sc-info-bg)" : "var(--sc-warn-bg)" },
+              { icon: Clock, label: "ยื่นคำขอเมื่อ", value: formatTime(selected.createdAt) || "-", color: "var(--sc-warn-fg)", bg: "var(--sc-warn-bg)" },
+              { icon: CheckCircle2, label: "สถานะ", value: getStatusBadge(selected).label, color: "var(--sc-ok-fg)", bg: "var(--sc-ok-bg)" },
+              { icon: Clock, label: "จบ (ส่งมอบ/ปิด) เมื่อ", value: resolveTime(selected.reviewedAt) ? formatTime(selected.reviewedAt) : "-", color: "var(--sc-brand-fg)", bg: "var(--sc-muted-bg)" },
             ].map((row, i) => (
               <div key={i} style={{
                 display: "flex", alignItems: "center", gap: "10px",
@@ -2228,9 +2228,9 @@ function AdminHistory({
             {selected.studentId && (
               <div style={{
                 display: "flex", alignItems: "center", gap: "10px",
-                padding: "10px 12px", borderRadius: "10px", backgroundColor: "#172036", marginBottom: "8px",
+                padding: "10px 12px", borderRadius: "10px", backgroundColor: "var(--sc-info-bg)", marginBottom: "8px",
               }}>
-                <IdCard size={16} color="#60a5fa" />
+                <IdCard size={16} color="var(--sc-info-fg)" />
                 <div>
                   <div style={{ fontSize: "10px", color: "var(--fg-muted)", fontWeight: 600 }}>รหัสนิสิต</div>
                   <div style={{ fontSize: "12px", fontWeight: 700, color: "var(--fg-strong)" }}>{selected.studentId}</div>
@@ -2253,11 +2253,11 @@ function AdminHistory({
 
             {selected.status === "rejected" && selected.rejectReason && (
               <div style={{
-                padding: "12px", backgroundColor: "#2a1418", borderRadius: "10px",
-                fontSize: "12px", color: "#fca5a5", lineHeight: 1.6, marginBottom: "12px",
-                border: "1px solid #4a1f28",
+                padding: "12px", backgroundColor: "var(--sc-danger-bg)", borderRadius: "10px",
+                fontSize: "12px", color: "var(--sc-danger-fg-strong)", lineHeight: 1.6, marginBottom: "12px",
+                border: "1px solid var(--sc-danger-border)",
               }}>
-                <div style={{ fontSize: "11px", fontWeight: 700, color: "#f87171", marginBottom: "4px" }}>
+                <div style={{ fontSize: "11px", fontWeight: 700, color: "var(--sc-danger-fg)", marginBottom: "4px" }}>
                   เหตุผลการปิดคำขอ
                 </div>
                 {selected.rejectReason}
@@ -2396,13 +2396,13 @@ function AdminPosts({ posts }: { posts: PostItem[] }) {
   };
 
   const statusLabel = (p: PostItem) => {
-    if (p.status === "rejected") return { text: "ถูกปฏิเสธ", bg: "#2a1418", color: "#f87171" };
-    if (p.status === "pending") return { text: "รอตรวจสอบ", bg: "#2a1a10", color: "#fbbf24" };
-    if (p.status === "suspended") return { text: "ระงับ", bg: "#2a1418", color: "#f87171" };
-    if (p.status === "resolved") return { text: "คืนแล้ว", bg: "#0f2a1f", color: "#34d399" };
-    if (p.status === "under_investigation") return { text: "อายัด", bg: "#2a1418", color: "#f87171" };
-    if (p.status === "in_progress") return { text: "ดำเนินการ", bg: "#172036", color: "#60a5fa" };
-    return { text: "ใช้งาน", bg: "#0f2a1f", color: "#34d399" };
+    if (p.status === "rejected") return { text: "ถูกปฏิเสธ", bg: "var(--sc-danger-bg)", color: "var(--sc-danger-fg)" };
+    if (p.status === "pending") return { text: "รอตรวจสอบ", bg: "var(--sc-warn-bg)", color: "var(--sc-warn-fg)" };
+    if (p.status === "suspended") return { text: "ระงับ", bg: "var(--sc-danger-bg)", color: "var(--sc-danger-fg)" };
+    if (p.status === "resolved") return { text: "คืนแล้ว", bg: "var(--sc-ok-bg)", color: "var(--sc-ok-fg)" };
+    if (p.status === "under_investigation") return { text: "อายัด", bg: "var(--sc-danger-bg)", color: "var(--sc-danger-fg)" };
+    if (p.status === "in_progress") return { text: "ดำเนินการ", bg: "var(--sc-info-bg)", color: "var(--sc-info-fg)" };
+    return { text: "ใช้งาน", bg: "var(--sc-ok-bg)", color: "var(--sc-ok-fg)" };
   };
 
   return (
@@ -2520,7 +2520,7 @@ function AdminPosts({ posts }: { posts: PostItem[] }) {
                     {post.itemType === "found" && post.depositLocation && (
                       <span style={{
                         fontSize: "10px", fontWeight: 700, padding: "2px 8px", borderRadius: "6px",
-                        backgroundColor: "#0f2a1f", color: "#34d399", border: "1px solid #1f4a35",
+                        backgroundColor: "var(--sc-ok-bg)", color: "var(--sc-ok-fg)", border: "1px solid var(--sc-ok-border)",
                         display: "inline-flex", alignItems: "center", gap: 4,
                       }}>
                         <ShieldAlert size={10} />
@@ -2608,11 +2608,11 @@ function AdminPosts({ posts }: { posts: PostItem[] }) {
                 display: "flex", alignItems: "center", gap: "8px",
                 padding: "8px 0", borderBottom: "1px solid var(--border)",
               }}>
-                <r.icon size={14} color={r.label === "จุดฝาก/คืน" ? "#34d399" : "var(--fg-faint)"} />
+                <r.icon size={14} color={r.label === "จุดฝาก/คืน" ? "var(--sc-ok-fg)" : "var(--fg-faint)"} />
                 <span style={{ fontSize: "11px", color: "var(--fg-faint)", width: "60px" }}>{r.label}</span>
                 <span style={{
                   fontSize: "12px", fontWeight: 600,
-                  color: r.label === "จุดฝาก/คืน" ? "#34d399" : "var(--fg-strong)",
+                  color: r.label === "จุดฝาก/คืน" ? "var(--sc-ok-fg)" : "var(--fg-strong)",
                 }}>{r.value}</span>
               </div>
             ))}
@@ -2621,8 +2621,8 @@ function AdminPosts({ posts }: { posts: PostItem[] }) {
               <div style={{ display: "flex", gap: "8px", width: "100%" }}>
               {selectedPost.status === "under_investigation" && (
                 <button onClick={() => handleUnhold(selectedPost)} style={{
-                  flex: 1, padding: "10px", borderRadius: "10px", border: "1px solid #1f4a35",
-                  backgroundColor: "#0f2a1f", color: "#34d399", fontSize: "12px", fontWeight: 700,
+                  flex: 1, padding: "10px", borderRadius: "10px", border: "1px solid var(--sc-ok-border)",
+                  backgroundColor: "var(--sc-ok-bg)", color: "var(--sc-ok-fg)", fontSize: "12px", fontWeight: 700,
                   cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", gap: "5px",
                 }}>
                   <ShieldCheck size={14} /> ปลดอายัด
@@ -2630,8 +2630,8 @@ function AdminPosts({ posts }: { posts: PostItem[] }) {
               )}
               {selectedPost.status !== "suspended" && (
                 <button onClick={() => handleSuspend(selectedPost)} style={{
-                  flex: 1, padding: "10px", borderRadius: "10px", border: "1px solid #4a3418",
-                  backgroundColor: "#2a1a10", color: "#fbbf24", fontSize: "12px", fontWeight: 700,
+                  flex: 1, padding: "10px", borderRadius: "10px", border: "1px solid var(--sc-warn-border)",
+                  backgroundColor: "var(--sc-warn-bg)", color: "var(--sc-warn-fg)", fontSize: "12px", fontWeight: 700,
                   cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", gap: "5px",
                 }}>
                   <Ban size={14} /> ระงับ
@@ -2639,16 +2639,16 @@ function AdminPosts({ posts }: { posts: PostItem[] }) {
               )}
               {selectedPost.status === "suspended" && (
                 <button onClick={() => handleRestore(selectedPost)} style={{
-                  flex: 1, padding: "10px", borderRadius: "10px", border: "1px solid #1f4a35",
-                  backgroundColor: "#0f2a1f", color: "#34d399", fontSize: "12px", fontWeight: 700,
+                  flex: 1, padding: "10px", borderRadius: "10px", border: "1px solid var(--sc-ok-border)",
+                  backgroundColor: "var(--sc-ok-bg)", color: "var(--sc-ok-fg)", fontSize: "12px", fontWeight: 700,
                   cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", gap: "5px",
                 }}>
                   <RefreshCw size={14} /> กู้คืน
                 </button>
               )}
               <button onClick={() => handleDelete(selectedPost)} disabled={deletingId === selectedPost.id} style={{
-                flex: 1, padding: "10px", borderRadius: "10px", border: "1px solid #4a1f28",
-                backgroundColor: "#2a1418", color: "#f87171", fontSize: "12px", fontWeight: 700,
+                flex: 1, padding: "10px", borderRadius: "10px", border: "1px solid var(--sc-danger-border)",
+                backgroundColor: "var(--sc-danger-bg)", color: "var(--sc-danger-fg)", fontSize: "12px", fontWeight: 700,
                 cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", gap: "5px",
               }}>
                 <Trash2 size={14} /> {deletingId === selectedPost.id ? "กำลังลบ..." : "ลบโพสต์"}
@@ -3006,12 +3006,12 @@ function AdminReports() {
 
   const statusBadge = (status?: string) => {
     const map: Record<string, { label: string; color: string; bg: string }> = {
-      open: { label: "เปิด", color: "#fbbf24", bg: "#2a2010" },
+      open: { label: "เปิด", color: "var(--sc-warn-fg)", bg: "var(--sc-warn-bg)" },
       dismissed: { label: "ปิดแล้ว", color: "#6b7280", bg: "#1f1f2f" },
-      post_deleted: { label: "ลบโพสต์แล้ว", color: "#f87171", bg: "#2a1418" },
-      reporter_banned: { label: "แบนผู้รายงาน", color: "#ef4444", bg: "#2a1010" },
-      post_suspended: { label: "ระงับโพสต์แล้ว", color: "#f87171", bg: "#2a1418" },
-      post_held: { label: "อายัดชั่วคราว", color: "#fbbf24", bg: "#2a2010" },
+      post_deleted: { label: "ลบโพสต์แล้ว", color: "var(--sc-danger-fg)", bg: "var(--sc-danger-bg)" },
+      reporter_banned: { label: "แบนผู้รายงาน", color: "#ef4444", bg: "var(--sc-danger-bg)" },
+      post_suspended: { label: "ระงับโพสต์แล้ว", color: "var(--sc-danger-fg)", bg: "var(--sc-danger-bg)" },
+      post_held: { label: "อายัดชั่วคราว", color: "var(--sc-warn-fg)", bg: "var(--sc-warn-bg)" },
     };
     const s = map[status || "open"] || map.open;
     return (
@@ -3027,7 +3027,7 @@ function AdminReports() {
   if (loading) {
     return (
       <div style={{ textAlign: "center", padding: "60px 20px", color: "var(--fg-muted)" }}>
-        <Loader2 size={32} color="#f87171" style={{ marginBottom: "12px", animation: "spin 1s linear infinite" }} />
+        <Loader2 size={32} color="var(--sc-danger-fg)" style={{ marginBottom: "12px", animation: "spin 1s linear infinite" }} />
         <div style={{ fontSize: "13px", fontWeight: 600 }}>กำลังโหลดรายงาน...</div>
       </div>
     );
@@ -3046,17 +3046,17 @@ function AdminReports() {
         </div>
         <div style={{
           flex: 1, padding: "12px 14px", borderRadius: "12px",
-          backgroundColor: "#2a2010", border: "1px solid #4a3a18",
+          backgroundColor: "var(--sc-warn-bg)", border: "1px solid #4a3a18",
         }}>
-          <div style={{ fontSize: "11px", color: "#fbbf24", fontWeight: 600 }}>เปิดอยู่</div>
-          <div style={{ fontSize: "22px", fontWeight: 800, color: "#fbbf24", marginTop: 2 }}>{openCount}</div>
+          <div style={{ fontSize: "11px", color: "var(--sc-warn-fg)", fontWeight: 600 }}>เปิดอยู่</div>
+          <div style={{ fontSize: "22px", fontWeight: 800, color: "var(--sc-warn-fg)", marginTop: 2 }}>{openCount}</div>
         </div>
         <div style={{
           flex: 1, padding: "12px 14px", borderRadius: "12px",
-          backgroundColor: "#0f2a1f", border: "1px solid #1f4a35",
+          backgroundColor: "var(--sc-ok-bg)", border: "1px solid var(--sc-ok-border)",
         }}>
-          <div style={{ fontSize: "11px", color: "#34d399", fontWeight: 600 }}>จัดการแล้ว</div>
-          <div style={{ fontSize: "22px", fontWeight: 800, color: "#34d399", marginTop: 2 }}>{resolvedCount}</div>
+          <div style={{ fontSize: "11px", color: "var(--sc-ok-fg)", fontWeight: 600 }}>จัดการแล้ว</div>
+          <div style={{ fontSize: "22px", fontWeight: 800, color: "var(--sc-ok-fg)", marginTop: 2 }}>{resolvedCount}</div>
         </div>
       </div>
 
@@ -3169,10 +3169,10 @@ function AdminReports() {
             }}>
               <div style={{
                 width: "36px", height: "36px", borderRadius: "10px", flexShrink: 0,
-                backgroundColor: "#2a1418", display: "flex",
+                backgroundColor: "var(--sc-danger-bg)", display: "flex",
                 alignItems: "center", justifyContent: "center",
               }}>
-                <Flag size={16} color="#f87171" />
+                <Flag size={16} color="var(--sc-danger-fg)" />
               </div>
               <div style={{ flex: 1, minWidth: 0 }}>
                 <div style={{ fontSize: "13px", fontWeight: 800, color: "var(--fg)" }}>
@@ -3230,14 +3230,14 @@ function AdminReports() {
                       <span style={{
                         display: "inline-flex", alignItems: "center", gap: 4, padding: "2px 8px",
                         borderRadius: 6, fontSize: 10.5, fontWeight: 700, flexShrink: 0,
-                        color: reportPost.status === "under_investigation" ? "#fbbf24"
-                          : reportPost.status === "resolved" ? "#34d399"
-                          : reportPost.status === "suspended" ? "#f87171"
-                          : reportPost.status === "in_progress" ? "#60a5fa" : "#34d399",
-                        backgroundColor: reportPost.status === "under_investigation" ? "#2a2010"
-                          : reportPost.status === "resolved" ? "#0f2a1f"
-                          : reportPost.status === "suspended" ? "#2a1418"
-                          : reportPost.status === "in_progress" ? "#172036" : "#0f2a1f",
+                        color: reportPost.status === "under_investigation" ? "var(--sc-warn-fg)"
+                          : reportPost.status === "resolved" ? "var(--sc-ok-fg)"
+                          : reportPost.status === "suspended" ? "var(--sc-danger-fg)"
+                          : reportPost.status === "in_progress" ? "var(--sc-info-fg)" : "var(--sc-ok-fg)",
+                        backgroundColor: reportPost.status === "under_investigation" ? "var(--sc-warn-bg)"
+                          : reportPost.status === "resolved" ? "var(--sc-ok-bg)"
+                          : reportPost.status === "suspended" ? "var(--sc-danger-bg)"
+                          : reportPost.status === "in_progress" ? "var(--sc-info-bg)" : "var(--sc-ok-bg)",
                       }}>
                         {reportPost.status === "under_investigation" ? "อายัด"
                           : reportPost.status === "resolved" ? "คืนแล้ว"
@@ -3268,7 +3268,7 @@ function AdminReports() {
                 </div>
                 <div style={{ flex: 1 }}>
                   <div style={{ fontSize: "11px", color: "var(--fg-muted)", fontWeight: 600, marginBottom: 2 }}>หมวดหมู่</div>
-                  <div style={{ fontSize: "12.5px", fontWeight: 600, color: "#f87171" }}>{selectedReport.category || "-"}</div>
+                  <div style={{ fontSize: "12.5px", fontWeight: 600, color: "var(--sc-danger-fg)" }}>{selectedReport.category || "-"}</div>
                 </div>
               </div>
 <div>
@@ -3286,9 +3286,9 @@ function AdminReports() {
                   <div style={{
                     display: "flex", flexDirection: "column", gap: "6px",
                     padding: "10px", borderRadius: "10px",
-                    backgroundColor: "#0f2a1f", border: "1px solid #1f4a35",
+                    backgroundColor: "var(--sc-ok-bg)", border: "1px solid var(--sc-ok-border)",
                   }}>
-                    <div style={{ fontSize: "11px", color: "#34d399", fontWeight: 700, display: "flex", alignItems: "center", gap: 5 }}>
+                    <div style={{ fontSize: "11px", color: "var(--sc-ok-fg)", fontWeight: 700, display: "flex", alignItems: "center", gap: 5 }}>
                       <Reply size={12} /> ตอบกลับผู้ใช้
                     </div>
                     <textarea
@@ -3333,8 +3333,8 @@ function AdminReports() {
                       {kind === "post_report" && (
                         <button onClick={() => handleSuspendPost(selectedReport)} style={{
                           flex: 1, padding: "10px", borderRadius: "10px",
-                          border: "1px solid #4a3418", backgroundColor: "#2a1a10",
-                          color: "#fbbf24", fontSize: "12px", fontWeight: 700,
+                          border: "1px solid var(--sc-warn-border)", backgroundColor: "var(--sc-warn-bg)",
+                          color: "var(--sc-warn-fg)", fontSize: "12px", fontWeight: 700,
                           cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", gap: "5px",
                         }}>
                           <Ban size={14} /> ระงับชั่วคราว
@@ -3343,8 +3343,8 @@ function AdminReports() {
                       {kind === "claim_dispute" && reportPost?.status !== "under_investigation" && (
                         <button onClick={() => handleHoldPost(selectedReport, true)} style={{
                           flex: 1, padding: "10px", borderRadius: "10px",
-                          border: "1px solid #4a3418", backgroundColor: "#2a1a10",
-                          color: "#fbbf24", fontSize: "12px", fontWeight: 700,
+                          border: "1px solid var(--sc-warn-border)", backgroundColor: "var(--sc-warn-bg)",
+                          color: "var(--sc-warn-fg)", fontSize: "12px", fontWeight: 700,
                           cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", gap: "5px",
                         }}>
                           <ShieldAlert size={14} /> อายัดชั่วคราว
@@ -3353,8 +3353,8 @@ function AdminReports() {
                       {kind === "claim_dispute" && reportPost?.status === "under_investigation" && (
                         <button onClick={() => handleHoldPost(selectedReport, false)} style={{
                           flex: 1, padding: "10px", borderRadius: "10px",
-                          border: "1px solid #1f4a35", backgroundColor: "#0f2a1f",
-                          color: "#34d399", fontSize: "12px", fontWeight: 700,
+                          border: "1px solid var(--sc-ok-border)", backgroundColor: "var(--sc-ok-bg)",
+                          color: "var(--sc-ok-fg)", fontSize: "12px", fontWeight: 700,
                           cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", gap: "5px",
                         }}>
                           <ShieldCheck size={14} /> ปลดอายัด
@@ -3362,8 +3362,8 @@ function AdminReports() {
                       )}
                       <button onClick={() => handleDeletePost(selectedReport)} style={{
                         flex: 1, padding: "10px", borderRadius: "10px",
-                        border: "1px solid #4a1f28", backgroundColor: "#2a1418",
-                        color: "#f87171", fontSize: "12px", fontWeight: 700,
+                        border: "1px solid var(--sc-danger-border)", backgroundColor: "var(--sc-danger-bg)",
+                        color: "var(--sc-danger-fg)", fontSize: "12px", fontWeight: 700,
                         cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", gap: "5px",
                       }}>
                         <Trash2 size={14} /> ลบโพสต์
@@ -3372,7 +3372,7 @@ function AdminReports() {
                   )}
                   <button onClick={() => handleBanReporter(selectedReport)} style={{
                     width: "100%", padding: "10px", borderRadius: "10px",
-                    border: "1px solid #4a1f28", backgroundColor: "#2a1010",
+                    border: "1px solid var(--sc-danger-border)", backgroundColor: "var(--sc-danger-bg)",
                     color: "#ef4444", fontSize: "12px", fontWeight: 700,
                     cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", gap: "5px",
                   }}>
@@ -3516,8 +3516,8 @@ function AdminUsers({ users }: { users: AdminUser[] }) {
 
       <div style={{
         display: "flex", alignItems: "center", gap: "8px",
-        padding: "10px 12px", backgroundColor: "#172036", border: "1px solid #2a3a5c",
-        borderRadius: "10px", fontSize: "12px", color: "#93b4f5",
+        padding: "10px 12px", backgroundColor: "var(--sc-info-bg)", border: "1px solid var(--sc-info-border)",
+        borderRadius: "10px", fontSize: "12px", color: "var(--sc-info-fg)",
       }}>
         <Users size={14} />
         ทั้งหมด <strong>{users.length}</strong> คน · ถูกแบน <strong>{users.filter((u) => u.banned).length}</strong> คน
@@ -3535,7 +3535,7 @@ function AdminUsers({ users }: { users: AdminUser[] }) {
         filtered.map((user) => (
           <div key={user.id} onClick={() => setSelectedUser(user)} style={{
             backgroundColor: "var(--bg-card)", borderRadius: "14px", padding: "14px 16px",
-            border: user.banned ? "1.5px solid #5c2534" : "1px solid var(--border)",
+            border: user.banned ? "1.5px solid var(--sc-danger-border)" : "1px solid var(--border)",
             cursor: "pointer", boxShadow: "0 2px 8px rgba(0,0,0,0.3)",
           }}>
             <div style={{ display: "flex", alignItems: "center", gap: "12px" }}>
@@ -3560,7 +3560,7 @@ function AdminUsers({ users }: { users: AdminUser[] }) {
               {user.banned && (
                 <span style={{
                   fontSize: "10px", fontWeight: 700, padding: "3px 8px", borderRadius: "6px",
-                  backgroundColor: "#2a1418", color: "#f87171",
+                  backgroundColor: "var(--sc-danger-bg)", color: "var(--sc-danger-fg)",
                 }}>
                   ถูกแบน
                 </span>
@@ -3614,7 +3614,7 @@ function AdminUsers({ users }: { users: AdminUser[] }) {
               {selectedUser.banned && (
                 <span style={{
                   display: "inline-block", marginTop: "8px", fontSize: "11px", fontWeight: 700,
-                  padding: "4px 12px", borderRadius: "8px", backgroundColor: "#2a1418", color: "#f87171",
+                  padding: "4px 12px", borderRadius: "8px", backgroundColor: "var(--sc-danger-bg)", color: "var(--sc-danger-fg)",
                 }}>
                   บัญชีถูกระงับ
                 </span>
@@ -3663,14 +3663,14 @@ function AdminUsers({ users }: { users: AdminUser[] }) {
                         </div>
                         <span style={{
                           fontSize: "9.5px", fontWeight: 700, padding: "2px 7px", borderRadius: "6px",
-                          color: p.status === "resolved" ? "#34d399"
-                            : p.status === "suspended" ? "#f87171"
-                            : p.status === "under_investigation" ? "#fbbf24"
-                            : p.status === "in_progress" ? "#60a5fa" : "#34d399",
-                          backgroundColor: p.status === "resolved" ? "#0f2a1f"
-                            : p.status === "suspended" ? "#2a1418"
-                            : p.status === "under_investigation" ? "#2a2010"
-                            : p.status === "in_progress" ? "#172036" : "#0f2a1f",
+                          color: p.status === "resolved" ? "var(--sc-ok-fg)"
+                            : p.status === "suspended" ? "var(--sc-danger-fg)"
+                            : p.status === "under_investigation" ? "var(--sc-warn-fg)"
+                            : p.status === "in_progress" ? "var(--sc-info-fg)" : "var(--sc-ok-fg)",
+                          backgroundColor: p.status === "resolved" ? "var(--sc-ok-bg)"
+                            : p.status === "suspended" ? "var(--sc-danger-bg)"
+                            : p.status === "under_investigation" ? "var(--sc-warn-bg)"
+                            : p.status === "in_progress" ? "var(--sc-info-bg)" : "var(--sc-ok-bg)",
                         }}>
                           {p.status === "resolved" ? "คืนแล้ว"
                             : p.status === "suspended" ? "ถูกระงับ"
@@ -3685,7 +3685,7 @@ function AdminUsers({ users }: { users: AdminUser[] }) {
 
               <div>
                 <div style={{ fontSize: "12px", fontWeight: 700, color: "var(--fg)", marginBottom: "6px" }}>
-                  คำขอรับของ <span style={{ color: "#fbbf24" }}>({userClaims.length})</span>
+                  คำขอรับของ <span style={{ color: "var(--sc-warn-fg)" }}>({userClaims.length})</span>
                 </div>
                 {userClaims.length === 0 ? (
                   <div style={{ fontSize: "11px", color: "var(--fg-faint)", padding: "8px 0" }}>ยังไม่เคยยื่นคำขอ</div>
@@ -3723,16 +3723,16 @@ function AdminUsers({ users }: { users: AdminUser[] }) {
             <div style={{ display: "flex", gap: "10px", marginTop: "18px" }}>
               {selectedUser.banned ? (
                 <button onClick={() => handleUnban(selectedUser)} style={{
-                  flex: 1, padding: "11px", borderRadius: "10px", border: "1px solid #1f4a35",
-                  backgroundColor: "#0f2a1f", color: "#34d399", fontSize: "13px", fontWeight: 700,
+                  flex: 1, padding: "11px", borderRadius: "10px", border: "1px solid var(--sc-ok-border)",
+                  backgroundColor: "var(--sc-ok-bg)", color: "var(--sc-ok-fg)", fontSize: "13px", fontWeight: 700,
                   cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", gap: "6px",
                 }}>
                   <ShieldCheck size={15} /> ปลดแบน
                 </button>
               ) : (
                 <button onClick={() => handleBan(selectedUser)} style={{
-                  flex: 1, padding: "11px", borderRadius: "10px", border: "1px solid #4a1f28",
-                  backgroundColor: "#2a1418", color: "#f87171", fontSize: "13px", fontWeight: 700,
+                  flex: 1, padding: "11px", borderRadius: "10px", border: "1px solid var(--sc-danger-border)",
+                  backgroundColor: "var(--sc-danger-bg)", color: "var(--sc-danger-fg)", fontSize: "13px", fontWeight: 700,
                   cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", gap: "6px",
                 }}>
                   <Ban size={15} /> แบนผู้ใช้
@@ -4202,9 +4202,9 @@ function AdminManageAdmins({ isSuper }: { isSuper: boolean }) {
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: "16px" }}>
       {/* คำอธิบาย */}
-      <div style={{ display: "flex", alignItems: "center", gap: "10px", padding: "12px 14px", backgroundColor: "#1c1a24", border: "1px solid #3a3350", borderRadius: "12px" }}>
+      <div style={{ display: "flex", alignItems: "center", gap: "10px", padding: "12px 14px", backgroundColor: "var(--sc-muted-bg)", border: "1px solid var(--sc-muted-border)", borderRadius: "12px" }}>
         <ShieldCheck size={16} color="#7c5cfc" style={{ flexShrink: 0 }} />
-        <div style={{ fontSize: "12px", color: "#c4b5fd", lineHeight: 1.5 }}>
+        <div style={{ fontSize: "12px", color: "var(--sc-brand-fg)", lineHeight: 1.5 }}>
           จัดการจุดคืนและเจ้าหน้าที่ประจำจุด · หนึ่งจุด = เจ้าหน้าที่ 1 คน · เปลี่ยนอีเมลที่จุด = ถอดสิทธิ์คนเดิมอัตโนมัติพร้อมแจ้งเตือน
         </div>
       </div>
@@ -4237,7 +4237,7 @@ function AdminManageAdmins({ isSuper }: { isSuper: boolean }) {
                   <span style={{ flex: 1, fontSize: "13px", color: "var(--fg)", fontWeight: 600, opacity: p.active === false ? 0.5 : 1 }}>
                     {p.name}{" "}
                     {p.active === false && (
-                      <span style={{ fontSize: "10px", color: "#f87171", fontWeight: 700, marginLeft: 6 }}>(ปิดอยู่)</span>
+                      <span style={{ fontSize: "10px", color: "var(--sc-danger-fg)", fontWeight: 700, marginLeft: 6 }}>(ปิดอยู่)</span>
                     )}
                   </span>
                   <button onClick={() => startRename(p)} disabled={busy} title="เปลี่ยนชื่อ" style={{ padding: "5px 9px", borderRadius: "7px", border: "1px solid var(--border)", background: "var(--bg-subtle)", color: "var(--fg-secondary)", cursor: "pointer" }}>
@@ -4246,7 +4246,7 @@ function AdminManageAdmins({ isSuper }: { isSuper: boolean }) {
                   <button onClick={() => deactivatePoint(p)} disabled={busy} title={p.active === false ? "เปิดใช้งาน" : "ปิดใช้งาน"} style={{ padding: "5px 9px", borderRadius: "7px", border: "1px solid var(--border)", background: "var(--bg-subtle)", color: "var(--fg-secondary)", cursor: "pointer" }}>
                     {p.active === false ? <CheckCircle2 size={13} /> : <X size={13} />}
                   </button>
-                  <button onClick={() => deletePoint(p)} disabled={busy} title="ลบจุดคืน" style={{ padding: "5px 9px", borderRadius: "7px", border: "1px solid #4a1f28", background: "#2a1418", color: "#f87171", cursor: "pointer" }}>
+                  <button onClick={() => deletePoint(p)} disabled={busy} title="ลบจุดคืน" style={{ padding: "5px 9px", borderRadius: "7px", border: "1px solid var(--sc-danger-border)", background: "var(--sc-danger-bg)", color: "var(--sc-danger-fg)", cursor: "pointer" }}>
                     <Trash2 size={13} />
                   </button>
                 </>
@@ -4331,7 +4331,7 @@ function AdminManageAdmins({ isSuper }: { isSuper: boolean }) {
                       จุด: {a.pointName || "ไม่ระบุ"}{a.uid ? " · (ล็อกอินแล้ว)" : ""}
                     </div>
                   </div>
-                  <button onClick={() => removeAdmin(a)} disabled={busy} title="ถอดสิทธิ์" style={{ padding: "6px 10px", borderRadius: "7px", border: "1px solid #4a1f28", background: "#2a1418", color: "#f87171", cursor: "pointer", fontSize: "11px", fontWeight: 700 }}>
+                  <button onClick={() => removeAdmin(a)} disabled={busy} title="ถอดสิทธิ์" style={{ padding: "6px 10px", borderRadius: "7px", border: "1px solid var(--sc-danger-border)", background: "var(--sc-danger-bg)", color: "var(--sc-danger-fg)", cursor: "pointer", fontSize: "11px", fontWeight: 700 }}>
                     <Trash2 size={13} />
                   </button>
                 </div>
