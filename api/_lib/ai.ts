@@ -18,11 +18,13 @@ export const LOCK_MATCH_SCORE = 90;
 // จำนวนคู่ที่ส่งให้ AI ตัดสินต่อ 1 โพสต์ (1 call = 1 request)
 const AI_JUDGE_TOP_N = 5;
 // ถ้า AI ล้มเหลว/ค้าง ให้ถือว่าโพสต์นี้ "ยังไม่ได้สแกน" แล้วรอบหน้าลองใหม่
-const AI_CALL_TIMEOUT_MS = 6_000;
+const AI_CALL_TIMEOUT_MS = 3_500;
 // เฝ้าจำนวน call ในหน้าต่างเวลา 60 วิ เพื่อไม่ให้ request เดียวทำงานเกิน
-// maxDuration 60 วินาทีของ Vercel (เคยเป็น: 6 วิ × 8 ครั้ง = 48 วิ พอดี ไม่ล้น)
+// maxDuration 60 วินาทีของ Vercel
+// รอบกวาด 8 โพสต์ × 2 call (ดึงข้อมูล + ตัดสิน) = 16 call
+// เคยตั้ง 8 แล้ว extract กินโควตาหมด ทำให้ AI ได้ตัดสินแค่ 3 โพสต์
 const AI_CALL_WINDOW_MS = 60_000;
-const AI_MAX_CALLS_PER_WINDOW = 8;
+const AI_MAX_CALLS_PER_WINDOW = 16;
 const AI_CALL_LOG: number[] = [];
 const aiCallBudgetOk = (): boolean => {
   const now = Date.now();
