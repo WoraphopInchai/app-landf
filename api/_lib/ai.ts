@@ -740,7 +740,9 @@ export async function runAiMatchServer(args: {
   const aiDocs = ranked;
 
   // ---------- ให้ AI ตัดสินคะแนนจริง (1 call = 1 request ต่อ 1 โพสต์) ----------
-  // เลือกเฉพาะคู่ที่ยัง "ไม่ถูกตัดสิน" และไม่ชนหมวดหมู่ เพื่อไม่เปลืองโควตา
+  // เลือกเฉพาะคู่ที่ยัง "ไม่ถูกตัดสิน" เพื่อไม่เปลืองโควตา
+  // ไม่กรองหมวดหมู่ต่างกันทิ้ง เพราะงานของ AI คือตัดสินกรณีพวกนี้พอดี
+  // (เช่น "กระเป๋า" กับ "กระเป๋าตัง" ที่กฎให้ 78 ผิด แต่ AI ให้ 10)
   const judgePool = ranked
     .filter((r) => {
       if (settledPairs.has(r.docSnap.id)) return false;
@@ -748,9 +750,6 @@ export async function runAiMatchServer(args: {
       const judged =
         judgedAt[r.docSnap.id] || (r.target.aiJudgedAt as Record<string, string>)?.[postId];
       if (judged && Date.now() - resolveMs(judged) < PAIR_REFRESH_MS) return false;
-      if (isCategoryConflict(String(post.category || ""), String(r.target.category || ""))) {
-        return false;
-      }
       return true;
     })
     .slice(0, AI_JUDGE_TOP_N);
