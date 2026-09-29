@@ -802,7 +802,12 @@ export async function runAiMatchServer(args: {
     const reason = verdict ? verdict.reason : rs.reason;
 
     const nowPair = Date.now();
-    judgedAt[docSnap.id] = new Date(nowPair).toISOString();
+    // อย่าประทับ aiJudgedAt ถ้ายังไม่ได้ตัดสินอะไรจริง: เคยเกิดเคส API key พัง
+    // แล้วทุกคู่ถูกประทับครบ ทำให้ AI ไม่ได้ลองใหม่อีกทั้ง 24 ชั่วโมง
+    // ประทับเฉพาะคู่ที่ AI ตัดสินแล้ว หรือคู่ที่กฎให้คะแนนถึงเกณฑ์ใกล้เคียง
+    if (verdict || score >= NEAR_MATCH_MIN_SCORE) {
+      judgedAt[docSnap.id] = new Date(nowPair).toISOString();
+    }
 
     // AI เป็นผู้ตัดสินแล้ว = ไม่ต้องผ่าน evidence gate ของกฎอีก
     const gatePassed = verdict
