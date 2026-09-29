@@ -634,9 +634,9 @@ export async function runAiMatchServer(args: {
     if (m.rejected) rejectedPairs.add(m.matchedPostId);
   }
   const settledPairs = new Set<string>();
-  for (const m of existingMatches) {
-    if (m.similarityScore >= MATCH_MIN_SCORE && !m.rejected) settledPairs.add(m.matchedPostId);
-  }
+  // เฉพาะคู่ที่ "ผู้ใช้ยืนยันแล้ว" เท่านั้นที่ล็อกถาวร
+  // เคยนับแมทที่ได้คะแนน >= 60 ด้วย ทำให้ผลของกฎเดิมถูกตรึงไว้
+  // และ AI ไม่มีโอกาสแก้ (เช่น 'กระเป๋า' x 'กระเป๋าตัง' ที่กฎให้ 78 ผิด)
   for (const m of existingMatches) {
     if (m.confirmed) settledPairs.add(m.matchedPostId);
   }
