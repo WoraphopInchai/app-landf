@@ -173,4 +173,162 @@ git status --short
 - `DEPLOY_CHECKLIST.md` — ขั้นตอน deploy เดิม + วิธี seed จุดคืนเริ่มต้น 6 จุด
 - `firestore.rules` — กฎความปลอดภัย (กฎนัดรับของอยู่ที่ `canCreateValidClaim()`)
 - `firestore.indexes.json` — 17 index (สำคัญที่สุด: `claims[postId + status + depositLocation]`)
-- `tests/firestore.rules.test.ts` — 79 เทสต์สำหรับกฎ
+- `tests/firestore.rules.test.ts` — 114 เทสต์สำหรับกฎ
+
+---
+
+## 7. รอบล่าสุด: ทางลัดดู/จัดการผู้ใช้ในแท็บแอดมิน
+
+### 7.1 สิ่งที่เพิ่ม
+
+- `src/AdminDashboard/Admin.tsx`
+  - `UserLink` — ข้อความกดได้ (ชื่อ/อีเมล) ใช้ร่วมกันทุกแท็บ
+  - `useUserInfo()` + `userInfoCache` — ดึงชื่อ/อีเมล/สถานะแบนจาก `users/{uid}` แล้วแคชใน memory
+  - `UserIdentity` — การ์ดชื่อ + อีเมลที่กดได้ทั้งสองช่อง
+  - `AdminUserSheet` — การ์ดผู้ใช้แบบทางลัด: ชื่อ, อีเมล, เบอร์, สิทธิ์, จุดประจำ, สถานะแบน,
+    โพสต์ล่าสุด 20 รายการ, คำขอล่าสุด 20 รายการ
+    (หัวหน้าแอดมินเท่านั้นที่ได้ปุ่มแบน/ปลดแบน และปุ่ม "จัดการผู้ใช้" ที่กระโดดไปแท็บ users)
+  - `PostFactsGrid` — ชุดข้อมูลโพสต์ฉบับครบ (สถานะ, จุดฝาก, สถานที่, ประเภท/คณะ, รหัสอ้างอิง,
+    พื้นที่ความปลอดภัย, วันที่พบ, เวลาส่ง, เริ่มดำเนินการ, ปิดเคส, คำขอที่กำลังจอง, Post ID, ผู้แจ้ง)
+  - เสียบเข้า `AdminFoundApprovals`, `AdminClaims`, `AdminHistory`, `AdminPosts`
+  - `AdminUsers` รับ `focusUser` เพื่อเปิดการ์ดของคนที่กดมาจากทางลัด
+
+### 7.2 กฎ Firestore ที่เปลี่ยน (ต้อง deploy)
+
+`match /users/{uid}` → เพิ่ม `isStaffAdmin(request.auth.uid)` ใน `allow read`
+เพื่อให้เจ้าหน้าที่ประจำจุดเห็นชื่อ/อีเมลของผู้ขอรับของ
+
+- เขียนยังเหมือนเดิม: ผู้ใช้แก้ของตัวเองได้, หัวหน้าแอดมินแก้ได้ทุกอย่าง, เจ้าหน้าที่แก้ของคนอื่นไม่ได้
+- ข้อควรระวัง: Firestore rules คุมระดับ document — เจ้าหน้าที่จึงอ่านข้อมูลผู้ใช้ได้ทั้ง document
+  (รวมฟิลด์ที่มีอยู่ใน schema ปัจจุบัน) หากไม่ต้องการ ให้ถอกลับบรรทัดนี้แล้วให้ staff เป็น read-only ที่ไม่มีข้อมูลติดต่อ
+
+### 7.3 สถานะ
+
+```
+tsc / lint / build        : ผ่าน
+npm run test:rules         : ผ่าน 95 เทสต์ (เพิ่มเคส staff อ่าน users 7 เคส + แก้เคสอนุมัติที่ต้องมีหลักฐาน)
+firestore.rules (deploy)   : ยังไม่ได้ deploy
+commit / push              : ยังไม่
+```
+
+### 7.4 ยังค้างจากรอบก่อน
+
+- `confirmHandover` → `deleteDoc(evidenceRef)` ยังไม่ถูก await (ตอน retry อาจเจอหลักฐานเดิมแล้ว `setDoc` กลายเป็น update ที่กฎไม่อนุญาต)
+- error `"เกิดข้อผิดพลาดในการยืนยัน"` ยังไม่ทราบสาเหตุจริงจาก browser (มี logging `[code] message` แล้ว)
+- ยังไม่ได้ deploy frontend (Login/Profile/นัดรับของ/แชทเต็มจอ) และยังไม่ชัดว่า host ที่ production คือ Firebase Hosting หรือ Vercel
+- `firestore.indexes.json` ยังไม่ได้ deploy แยก
+- รูปหลักฐาน Cloudinary เป็น unsigned public URL → ยังไม่รับประกัน privacy
+
+---
+
+## 8. รอบล่าสุด: ประวัติลบได้ + ดูโพสต์คู่ + คืนของแล้วโพสต์หายไม่ขึ้นซ้ำ
+
+### 8.1 หน้าประวัติ (`AdminHistory` ใน `src/AdminDashboard/Admin.tsx`)
+
+- **ลบรายการประวัติ** — ปุ่ม "ลบ" ทั้งในการ์ดรายการและใน sheet รายละเอียด → `ConfirmModal` → `deleteDoc(claims/{claimId})`
+  - ลบเฉพาะรายการที่ปิดเคสแล้ว (approved/rejected/expired/post_deleted) — คำขอที่ยัง `pending` ลบไม่ได้ (กฎบังคับ)
+  - การลบไม่ย้อนสถานะโพสต์ (เจ้าของยังเห็นโพสต์ของตัวเองใน MyItems)
+  - หมายเหตุ: ลบ claim แล้วเอกสารหลักฐานใน `claims/{id}/handover/evidence` จะยังค้างอยู่
+    (Firestore ไม่ลบ subcollection อัตโนมัติ และกฎห้ามลบหลักฐานหลังอนุมัติ) → ข้อมูลค้างเล็กน้อย ไม่กระทบการแสดงผล
+- **ดูรายละเอียดโพสต์** — ปุ่ม "โพสต์" ในการ์ดรายการ + ปุ่ม "ดูโพสต์ของพบ/ของหาย" ใน sheet
+  → เปิด `ReviewSheet` ซ้อน (zIndex 340) พร้อม `ReviewImage` หลายรูป, คำอธิบาย, `UserIdentity` เจ้าของ, `PostFactsGrid`, lightbox
+- **คืนของแล้ว → โพสต์คู่** — เฉพาะ `status === "approved"`:
+  - ดึง `claim.postId` (โพสต์ของพบ) เสมอ
+  - ดึง `claim.matchedPostId` (โพสต์ของหายที่ผู้ขอเลือก) **เฉพาะเมื่อมีค่านี้** — ไม่มีก็ไม่ query
+  - แสดงเป็นกริดสองคอลัมน์ (`PairedPostCard`) พร้อมปุ่ม "ดูรายละเอียดโพสต์" ของแต่ละฝั่ง
+  - อยู่ถัดจากรูปหลักฐานส่งมอบ → เห็นทั้งหลักฐานและโพสต์ทั้งสองฝั่งในที่เดียว
+  - **ปฏิเสธ → แสดงตามปกติ ไม่ดึงโพสต์มาแสดงคู่**
+  - โหลดผ่าน `loadPostDoc()` ซึ่งคืน `null` เมื่ออ่านไม่ได้ (เช่น staff ต่างจุด) → ไม่ทำหน้าจอพัง
+
+### 8.2 คืนของแล้ว → โพสต์ของหายไม่ขึ้นซ้ำใน Home
+
+- `confirmHandover()` เพิ่ม **จังหวะที่ 4**: หลัง transaction อนุมัติสำเร็จ
+  `updateDoc(posts/{matchedPostId}, { status: "resolved", resolvedAt, matchedClaimId: claim.id })`
+  - ทำ **แยกจาก transaction** เพราะกฎต้องเห็น `claim.status == 'approved'` (ใน transaction กฎยังเห็นเป็น `pending`
+    ตารางคือเรื่องเดียวกับ `hasHandoverEvidence()`)
+  - ไม่มี `matchedPostId` → ไม่แตะโพสต์ใด
+  - ปิดไม่สำเร็จ → ไม่ย้อนการอนุมัติ แต่ขึ้น toast เตือนให้ตรวจสอบ (`matchedPostWarning`)
+- `src/types.ts` → `PostItem.matchedClaimId?: string`
+- `src/Pages/Home.tsx` → map `matchedClaimId` และกรอง `if (post.matchedClaimId) return false;` ใน `validPosts`
+  - ตัวกรองทำก่อนจำนวนบนแท็บ (`countStatus` อ่านจาก `posts` ที่กรองแล้ว) → โพสต์หายไม่ขึ้นทุกแท็บ
+    และจำนวน "คืนแล้ว" ไม่เพิ่ม (เหลือเฉพาะโพสต์พบฝั่งที่คืน)
+  - เจ้าของยังเห็นสถานะ "พบเจ้าของแล้ว" ใน MyItems ตามปกติ
+
+### 8.3 กฎ Firestore ที่เพิ่ม (ต้อง deploy)
+
+- `claims` → `allow delete`: เพิ่มสิทธิ์แอดมินลบรายการประวัติ
+  - หัวหน้าแอดมิน: ทุกเคส / เจ้าหน้าที่: เฉพาะ `depositLocation == staffPointName()`
+  - จำกัด `status != 'pending'` (ผู้ขอลบ pending ของตัวเองได้เหมือนเดิม)
+- `posts` → ฟังก์ชันใหม่ `canCloseMatchedLostPost(matchedLostPostId)` (เรียกจาก `allow update`)
+  - ต้องมี `matchedClaimId` ที่ชี้คำขอจริง + คำขอ `approved` + `matchedPostId` ตรงกับโพสต์ที่แก้
+    + ผู้ขอต้องเป็นเจ้าของโพสต์หาย + เป็น `itemType: lost` + ยังไม่ `resolved`
+  - แก้ได้เฉพาะ `status`, `resolvedAt`, `matchedClaimId`
+  - สิทธิ์: หัวหน้าแอดมิน หรือเจ้าหน้าที่ของจุดของ **โพสต์ของพบ** ในคำขอนั้น
+  - ข้อควรระวัง: path wildcard (`postId`) ใช้ในฟังก์ชันระดับบนไม่ได้ ต้องส่งเป็น parameter
+    (ไม่งั้นได้ "Null value error" แล้ว `allow update` พังทั้งบล็อก)
+
+### 8.4 สาเหตุที่ของหายยังขึ้นใน Home ตอนอนุมัติ (เช็กจาก ruleset ที่ deploy จริง)
+
+ตรวจ `releases/cloud.firestore` ของ `up-lost-and-found-54e23` (ruleset `0d4fc3e2…`, updateTime 2026-10-01 20:36)
+→ **กฎบน production เป็นเวอร์ชัน commit `12cb639`** ยังไม่มี `canCloseMatchedLostPost`
+และไม่มี `isStaffAdmin` ใน `match /users/{uid} allow read`
+
+ผลคือ `updateDoc(posts/{matchedPostId})` ตอนอนุมัติโดน `PERMISSION_DENIED`
+→ โพสต์ของหายยัง `active` → ยังขึ้นในหน้า Home (และ `Home.tsx` ที่กรอง `matchedClaimId` ก็ยังไม่ได้ deploy)
+
+### 8.4b สาเหตุที่แก้จริง: `resolved` ยังอยู่ใน query ของฟีด (แก้แล้ว)
+
+Home ดึง `where("status","in",["active","in_progress","resolved","under_investigation"])`
+→ ถึงแม้โพสต์หายจะถูกปิดเป็น `resolved` แล้ว **มันก็ยังโผล่ในฟีด** (แท็บ "คืนแล้ว")
+การกรองด้วย `matchedClaimId` จึงพึ่งการ deploy หน้าเว็บ ซึ่งยังไม่ได้ทำ
+
+**วิธีแก้ที่ไม่ต้องรอ deploy หน้าเว็บ:** ใช้สถานะใหม่ `returned_matched`
+(ตั้งใจให้ต่างจาก `resolved` เพราะ Home ไม่ได้ดึงสถานะนี้ → โพสต์หายที่คืนแล้วหายจากฟีดทันที
+ไม่ขึ้นแท็บ "ของหาย" และไม่ไปรวมในจำนวน "คืนแล้ว")
+
+จุดที่ต้องแก้ให้รองรับ `returned_matched`:
+- `firestore.rules` `canCloseMatchedLostPost` — บังคับสถานะเป็น `returned_matched`
+- `Admin.tsx` `closeMatchedLostPostDoc()` — เขียน `status: "returned_matched"`
+- `POST_STATUS_META` — ป้าย "คืนแล้ว (จับคู่กับโพสต์ของพบ)"
+- `MyItems.tsx` `getStatusInfo()` — เจ้าของเห็นเป็น "พบเจ้าของแล้ว"
+- `ItemDetail.tsx` `isResolved` — รวม `returned_matched` (เจ้าของเห็นว่าจบแล้ว/กดขอรับซ้ำไม่ได้)
+- ปุ่มซ่อมในหน้าประวัติเช็ค `!== "returned_matched"` (เดิมเช็ค `resolved`)
+
+`Home.tsx` ยังกรอง `matchedClaimId` ไว้เป็นชั้นกันพลาด (โพสต์ `resolved` รุ่นเก่าที่ deploy ค้างไว้)
+
+**หลักฐานจากข้อมูล production:**
+- claim ที่อนุมัติ 2026-10-01 20:41 และ 20:55 UTC เกิด**ก่อน** deploy กฎ → ปิดโพสต์หายไม่สำเร็จ
+- โพสต์หาย `nTlSMPaisXbyQdJGdCwQ` ค้าง `active` ไม่มี `matchedClaimId` → ยังอยู่ในฟีด
+- backfill แล้ว: `status = returned_matched`, `matchedClaimId = 5nhuwfUG7KER87UD8iHH`
+- ยืนยันหลัง backfill: ไม่อยู่ในฟีด `active` แล้ว
+
+```bash
+npx firebase deploy --only firestore:rules      # ✅ deploy แล้ว (ครั้งที่ 2)
+```
+
+**เหลือ: deploy frontend** — ยังไม่ชัดว่า production โฮสต์ที่ Firebase Hosting หรือ Vercel (รอผู้ใช้ยืนยัน)
+แต่ **ไม่กระทบการหายจากฟีดแล้ว** เพราะใช้สถานะ `returned_matched` ที่ถูกตัดออกตั้งแต่ query ฝั่ง server
+สิ่งที่ยังรอ deploy หน้าเว็บ: ป้ายสถานะ/ไอคอนใหม่ใน `Home.tsx`, ปุ่มซ่อม "ปิดโพสต์ของหาย" ในหน้าประวัติ,
+`MyItems.tsx` กับ `ItemDetail.tsx` ที่แก้รองรับสถานะใหม่ — ค่านี้ไม่กระทบว่าโพสต์หายโผล่ในฟีดหรือไม่
+
+**ทางแก้เคสที่อนุมัติไปแล้ว (ต้อง deploy หน้าเว็บถึงจะกดได้):**
+หน้าประวัติแสดงการ์ดคู่ → ถ้าโพสต์หายที่ผู้ขอเลือกยังไม่ `returned_matched`
+จะขึ้นกล่องเตือน + ปุ่ม **"ปิดโพสต์ของหาย"** (`handleCloseMatchedPost`) → กดแล้วหายจาก Home ทันที
+(รอบนี้ backfill เคสที่ค้างบน production ให้แล้วโดยตรง ดูหลักฐานข้างบน)
+
+### 8.5 สถานะ
+
+```
+tsc / lint / build        : ผ่าน
+npm run test:rules         : ผ่าน 114 เทสต์ (เพิ่มประวัติลบ 8 เคส + ปิดโพสต์หายที่จับคู่ 9 เคส)
+firestore.rules (deploy)   : ✅ deploy แล้ว 2 รอบ — รวมกฎรอบที่ 7 และรอบที่ 8 (สถานะ returned_matched)
+backfill production        : ✅ ปิดโพสต์หาย nTlSMPaisXbyQdJGdCwQ ที่ค้างจากการอนุมัติก่อน deploy กฎ
+commit / push              : ยังไม่
+```
+
+### 8.6 ยังต้องทดสอบใน browser
+
+- อนุมัติคำขอที่มี `matchedPostId` → ตรวจว่าโพสต์หายหายจาก Home ทันที และจำนวน "คืนแล้ว" เพิ่มขึ้น 1
+- หน้าประวัติ: เปิดรายการที่คืนของแล้ว → ต้องเห็น 2 การ์ด + หลักฐานส่งมอบ; รายการที่ปฏิเสธต้องไม่มีส่วนคู่
+- ลบรายการประวัติทั้งในการ์ดและใน sheet + ทดสอบ staff ต่างจุด (ต้องขึ้น "ลบไม่สำเร็จ")
+

@@ -85,6 +85,24 @@ const seedReport = (db: any, id: string, reporterId: string, postId: string) =>
 const seedNotification = (db: any, id: string, data: Record<string, unknown>) =>
   db.collection("notifications").doc(id).set({ read: false, ...data });
 
+/** บันทึกหลักฐานการส่งมอบ (claims/{claimId}/handover/evidence) แบบ bypass rules — ใช้เตรียมข้อมูลก่อนทดสอบการอนุมัติ */
+const seedHandoverEvidence = async (env: RulesTestEnvironment, claimId: string, capturedByUid: string) => {
+  await env.withSecurityRulesDisabled(async (ctx) => {
+    await ctx
+      .firestore()
+      .collection("claims")
+      .doc(claimId)
+      .collection("handover")
+      .doc("evidence")
+      .set({
+        photoUrl: "https://res.cloudinary.com/demo/image/upload/sample.jpg",
+        depositLocation: LIB_POINT,
+        capturedByUid,
+        capturedAt: new Date().toISOString(),
+      });
+  });
+};
+
 beforeAll(async () => {
   const rules = fs.readFileSync(
     path.resolve(process.cwd(), "firestore.rules"),
@@ -674,9 +692,21 @@ describe("Regression — กันจองซ้อน / staff scope / double h
     );
   });
 
-  it("staff อนุมัติ claim ของจุดตัวเองผ่านได้", async () => {
+  it("staff อนุมัติ claim ของจุดตัวเองผ่านได้ (เมื่อบันทึกหลักฐานส่งมอบแล้ว)", async () => {
+    await seedHandoverEvidence(env, "claimA", SUPER_UID);
     const db = authAs(STAFF_LIB_UID, { email: STAFF_LIB_EMAIL }).firestore();
     await assertSucceeds(
+      db.collection("claims").doc("claimA").update({
+        status: "approved",
+        reviewedAt: new Date().toISOString(),
+        reviewedByUid: STAFF_LIB_UID,
+      })
+    );
+  });
+
+  it("staff อนุมัติ claim ที่ยังไม่มีหลักฐานส่งมอบ → denied", async () => {
+    const db = authAs(STAFF_LIB_UID, { email: STAFF_LIB_EMAIL }).firestore();
+    await assertFails(
       db.collection("claims").doc("claimA").update({
         status: "approved",
         reviewedAt: new Date().toISOString(),
@@ -1040,6 +1070,288 @@ describe("AI match fields — client สร้าง/แก้เองไม่
     const db = authAs(OWNER_UID).firestore();
     await assertSucceeds(
       db.collection("posts").doc("postLost").update({ title: "กุญแจหาย (แก้ไข)" })
+    );
+  });
+});
+
+// =====================================================================
+// users read — ทางลัดดูผู้ใช้จากฝั่งแอดมิน (ต้องเห็นชื่อ/อีเมลเพื่อติดต่อและบริหารคำขอ)
+// =====================================================================
+describe("users read — แอดมินดูข้อมูลผู้ใช้ได้", () => {
+  it("ผู้ใช้อ่านข้อมูลของตัวเองได้", async () => {
+    const db = authAs(USER_B_UID).firestore();
+    await assertSucceeds(db.collection("users").doc(USER_B_UID).get());
+  });
+
+  it("ผู้ใช้ทั่วไปอ่านข้อมูลผู้อื่น → denied", async () => {
+    const db = authAs(USER_B_UID).firestore();
+    await assertFails(db.collection("users").doc(USER_C_UID).get());
+  });
+
+  it("เจ้าหน้าที่ประจำจุดอ่านข้อมูลผู้ใช้ได้ (เพื่อดูชื่อ/อีเมลตอนอนุมัติคำขอ)", async () => {
+    const db = authAs(STAFF_LIB_UID, { email: STAFF_LIB_EMAIL }).firestore();
+    await assertSucceeds(db.collection("users").doc(USER_B_UID).get());
+  });
+
+  it("หัวหน้าแอดมินอ่านข้อมูลผู้ใช้ได้", async () => {
+    const db = authAs(SUPER_UID).firestore();
+    await assertSucceeds(db.collection("users").doc(USER_B_UID).get());
+  });
+
+  it("เจ้าหน้าที่แก้ข้อมูลผู้ใช้อื่น (เช่น banned) → denied", async () => {
+    const db = authAs(STAFF_LIB_UID, { email: STAFF_LIB_EMAIL }).firestore();
+    await assertFails(db.collection("users").doc(USER_B_UID).update({ banned: true }));
+  });
+
+  it("ผู้ใช้แบนตัวเองเอง → denied", async () => {
+    const db = authAs(USER_B_UID).firestore();
+    await assertFails(db.collection("users").doc(USER_B_UID).update({ banned: true }));
+  });
+
+  it("หัวหน้าแอดมินแบนผู้ใช้ได้", async () => {
+    const db = authAs(SUPER_UID).firestore();
+    await assertSucceeds(db.collection("users").doc(USER_B_UID).update({ banned: true }));
+  });
+});
+
+// =====================================================================
+// ประวัติ — ลบรายการที่ปิดเคสแล้วได้ (หน้า "ประวัติ" มีปุ่มลบ)
+//   - หัวหน้าแอดมิน: ทุกเคส
+//   - เจ้าหน้าที่: เฉพาะคำขอที่จุดของตัวเอง
+//   - ห้ามลบคำขอที่ยัง pending (ยังอยู่หน้า "คำขอ" กำลังดำเนินการอยู่)
+// =====================================================================
+describe("ประวัติ — ลบรายการ (claim delete)", () => {
+  const seedClosedClaim = async (id: string, status: string, depositLocation: string) =>
+    env.withSecurityRulesDisabled(async (ctx) => {
+      await ctx
+        .firestore()
+        .collection("claims")
+        .doc(id)
+        .set({
+          claimantId: USER_B_UID,
+          postId: "postA",
+          depositLocation,
+          status,
+          expiresAtMs: NOW_MS - DAY,
+          reviewedAt: new Date().toISOString(),
+          reviewedByUid: SUPER_UID,
+        });
+    });
+
+  it("หัวหน้าแอดมินลบรายการประวัติ (approved) ได้", async () => {
+    await seedClosedClaim("histApproved", "approved", LIB_POINT);
+    const db = authAs(SUPER_UID).firestore();
+    await assertSucceeds(db.collection("claims").doc("histApproved").delete());
+  });
+
+  it("หัวหน้าแอดมินลบรายการประวัติ (rejected) ได้", async () => {
+    await seedClosedClaim("histRejected", "rejected", SCI_POINT);
+    const db = authAs(SUPER_UID).firestore();
+    await assertSucceeds(db.collection("claims").doc("histRejected").delete());
+  });
+
+  it("เจ้าหน้าที่ลบรายการประวัติที่จุดของตัวเองได้", async () => {
+    await seedClosedClaim("histLib", "approved", LIB_POINT);
+    const db = authAs(STAFF_LIB_UID, { email: STAFF_LIB_EMAIL }).firestore();
+    await assertSucceeds(db.collection("claims").doc("histLib").delete());
+  });
+
+  it("เจ้าหน้าที่ลบรายการประวัติที่จุดอื่น → denied", async () => {
+    await seedClosedClaim("histSci", "approved", SCI_POINT);
+    const db = authAs(STAFF_LIB_UID, { email: STAFF_LIB_EMAIL }).firestore();
+    await assertFails(db.collection("claims").doc("histSci").delete());
+  });
+
+  it("แอดมินลบคำขอที่ยัง pending ไม่ได้ (ยังอยู่หน้า 'คำขอ')", async () => {
+    const db = authAs(SUPER_UID).firestore();
+    await assertFails(db.collection("claims").doc("claimA").delete());
+  });
+
+  it("ผู้ใช้ทั่วไปลบรายการประวัติของคนอื่น → denied", async () => {
+    await seedClosedClaim("histApproved", "approved", LIB_POINT);
+    const db = authAs(USER_C_UID).firestore();
+    await assertFails(db.collection("claims").doc("histApproved").delete());
+  });
+
+  it("เจ้าของโพสต์ลบประวัติของตัวเองที่ปิดเคสแล้ว → denied (ไม่ใช่หน้าที่เจ้าหน้าที่)", async () => {
+    await seedClosedClaim("histApproved", "approved", LIB_POINT);
+    const db = authAs(OWNER_UID).firestore();
+    await assertFails(db.collection("claims").doc("histApproved").delete());
+  });
+
+  it("ผู้ขอยังลบคำขอ pending ของตัวเองได้ (rollback เดิม)", async () => {
+    const db = authAs(USER_B_UID).firestore();
+    await assertSucceeds(db.collection("claims").doc("claimA").delete());
+  });
+});
+
+// =====================================================================
+// คืนของแล้ว — ปิดโพสต์ของหายที่ผู้ขอเลือก (ไม่ให้ขึ้นซ้ำใน Home)
+//   ทำเป็นจังหวะแยกหลังอนุมัติ เพราะกฎต้องเห็นสถานะ claim = approved
+// =====================================================================
+describe("ปิดโพสต์ของหายที่ผู้ขอเลือก (matchedPostId)", () => {
+  /** โพสต์ของหายของผู้ขอ + คำขอที่อนุมัติแล้วและผูกโพสต์หายไว้ */
+  const seedApprovedClaimWithLostPost = async (claimId: string, lostPostId: string) =>
+    env.withSecurityRulesDisabled(async (ctx) => {
+      const db = ctx.firestore();
+      await db.collection("posts").doc(lostPostId).set({
+        title: "กุญแจหาย",
+        itemType: "lost",
+        status: "active",
+        userId: USER_B_UID,
+        depositLocation: "",
+      });
+      await db.collection("claims").doc(claimId).set({
+        claimantId: USER_B_UID,
+        postId: "postA",
+        matchedPostId: lostPostId,
+        depositLocation: LIB_POINT,
+        status: "approved",
+        expiresAtMs: NOW_MS - DAY,
+        reviewedAt: new Date().toISOString(),
+        reviewedByUid: SUPER_UID,
+      });
+    });
+
+  it("เจ้าหน้าที่ปิดโพสต์ของหายที่ผู้ขอเลือกได้ (คำขออนุมัติแล้ว)", async () => {
+    await seedApprovedClaimWithLostPost("claimMatched", "lostMatched");
+    const db = authAs(STAFF_LIB_UID, { email: STAFF_LIB_EMAIL }).firestore();
+    await assertSucceeds(
+      db.collection("posts").doc("lostMatched").update({
+        status: "returned_matched",
+        resolvedAt: new Date().toISOString(),
+        matchedClaimId: "claimMatched",
+      })
+    );
+  });
+
+  it("หัวหน้าแอดมินปิดโพสต์ของหายที่ผู้ขอเลือกได้", async () => {
+    await seedApprovedClaimWithLostPost("claimMatched", "lostMatched");
+    const db = authAs(SUPER_UID).firestore();
+    await assertSucceeds(
+      db.collection("posts").doc("lostMatched").update({
+        status: "returned_matched",
+        resolvedAt: new Date().toISOString(),
+        matchedClaimId: "claimMatched",
+      })
+    );
+  });
+
+  it("คำขอยังไม่อนุมัติ → ปิดโพสต์ของหายไม่ได้", async () => {
+    // ใช้บริบทเจ้าหน้าที่ (หัวหน้าแอดมินแก้โพสต์ได้ทุกชิ้นอยู่แล้ว ไม่ใช่ขอบเขตนี้)
+    const db = authAs(STAFF_LIB_UID, { email: STAFF_LIB_EMAIL }).firestore();
+    await assertFails(
+      db.collection("posts").doc("postLost").update({
+        status: "returned_matched",
+        resolvedAt: new Date().toISOString(),
+        matchedClaimId: "claimA",
+      })
+    );
+  });
+
+  it("matchedPostId ในคำขอไม่ตรงกับโพสต์ที่แก้ → denied", async () => {
+    await seedApprovedClaimWithLostPost("claimMatched", "lostMatched");
+    const db = authAs(STAFF_LIB_UID, { email: STAFF_LIB_EMAIL }).firestore();
+    await assertFails(
+      db.collection("posts").doc("postLost").update({
+        status: "returned_matched",
+        resolvedAt: new Date().toISOString(),
+        matchedClaimId: "claimMatched",
+      })
+    );
+  });
+
+  it("โพสต์หายของคนอื่น (ไม่ใช่ของผู้ขอ) → denied", async () => {
+    await seedApprovedClaimWithLostPost("claimMatched", "lostOther");
+    // เปลี่ยนเจ้าของโพสต์หายเป็นคนอื่น (ผู้ขอคือ USER_B) — กฎต้องปฏิเสธ
+    await env.withSecurityRulesDisabled(async (ctx) => {
+      await ctx.firestore().collection("posts").doc("lostOther").update({
+        userId: USER_C_UID,
+      });
+    });
+    const db = authAs(STAFF_LIB_UID, { email: STAFF_LIB_EMAIL }).firestore();
+    await assertFails(
+      db.collection("posts").doc("lostOther").update({
+        status: "returned_matched",
+        resolvedAt: new Date().toISOString(),
+        matchedClaimId: "claimMatched",
+      })
+    );
+  });
+
+  it("เจ้าหน้าที่จุดอื่นปิดโพสต์ของหายของคำขอจุดนี้ → denied", async () => {
+    await seedApprovedClaimWithLostPost("claimMatched", "lostMatched");
+    const db = authAs(STAFF_SCI_UID, { email: STAFF_SCI_EMAIL }).firestore();
+    await assertFails(
+      db.collection("posts").doc("lostMatched").update({
+        status: "returned_matched",
+        resolvedAt: new Date().toISOString(),
+        matchedClaimId: "claimMatched",
+      })
+    );
+  });
+
+  it("แก้ฟิลด์อื่นของโพสต์หายพร้อมกัน → denied (แก้ได้แค่ status/resolvedAt/matchedClaimId)", async () => {
+    await seedApprovedClaimWithLostPost("claimMatched", "lostMatched");
+    const db = authAs(STAFF_LIB_UID, { email: STAFF_LIB_EMAIL }).firestore();
+    await assertFails(
+      db.collection("posts").doc("lostMatched").update({
+        status: "returned_matched",
+        resolvedAt: new Date().toISOString(),
+        matchedClaimId: "claimMatched",
+        title: "เปลี่ยนชื่อของ",
+      })
+    );
+  });
+
+  it("ไม่มี matchedClaimId แต่พยายามปิดโพสต์หาย → denied (ห้ามเดาเอง)", async () => {
+    await seedApprovedClaimWithLostPost("claimMatched", "lostMatched");
+    const db = authAs(STAFF_LIB_UID, { email: STAFF_LIB_EMAIL }).firestore();
+    await assertFails(
+      db.collection("posts").doc("lostMatched").update({
+        status: "returned_matched",
+        resolvedAt: new Date().toISOString(),
+      })
+    );
+  });
+
+  it("โพสต์หายที่ถูกปิดไปแล้ว (returned_matched) ปิดซ้ำอีกครั้ง → denied", async () => {
+    await seedApprovedClaimWithLostPost("claimMatched", "lostMatched");
+    const db = authAs(STAFF_LIB_UID, { email: STAFF_LIB_EMAIL }).firestore();
+    await assertSucceeds(
+      db.collection("posts").doc("lostMatched").update({
+        status: "returned_matched",
+        resolvedAt: new Date().toISOString(),
+        matchedClaimId: "claimMatched",
+      })
+    );
+    await assertFails(
+      db.collection("posts").doc("lostMatched").update({
+        matchedClaimId: "claimMatched",
+        resolvedAt: new Date(Date.now() + HOUR).toISOString(),
+      })
+    );
+  });
+
+  it("owner ปิดโพสต์ของหายตัวเองเอง → denied (ต้องให้แอดมินเป็นคนปิด)", async () => {
+    await seedApprovedClaimWithLostPost("claimMatched", "lostMatched");
+    const db = authAs(USER_B_UID).firestore();
+    await assertFails(
+      db.collection("posts").doc("lostMatched").update({
+        status: "returned_matched",
+        matchedClaimId: "claimMatched",
+      })
+    );
+  });
+
+  it("โพสต์ของพบหลุดจากขอบเขตนี้ (ยังคงอนุมัติโพสต์พบตามกฎเดิม)", async () => {
+    await seedApprovedClaimWithLostPost("claimMatched", "lostMatched");
+    const db = authAs(STAFF_LIB_UID, { email: STAFF_LIB_EMAIL }).firestore();
+    await assertFails(
+      db.collection("posts").doc("postA").update({
+        status: "resolved",
+        matchedClaimId: "claimMatched",
+      })
     );
   });
 });

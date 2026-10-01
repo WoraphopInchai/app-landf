@@ -195,6 +195,42 @@ service cloud.firestore {
         ]);
     }
 
+    // ปิดโพสต์ของหายที่ผู้ขอเลือก หลังอนุมัติคำขอสำเร็จ
+    //   (อนุมัติแล้วโพสต์ของหายของผู้ขอต้องหายจากหน้า Home ด้วย ไม่งั้นขึ้นซ้ำ 2 โพสต์)
+    // เงื่อนไข (ไม่มีช่องอ้อม — ทุกข้อต้องเป็นจริง):
+    //   1. มี matchedClaimId ที่ชี้มาคำขอจริง
+    //   2. คำขอนั้นอนุมัติแล้ว และ matchedPostId ของคำขอตรงกับโพสต์ที่กำลังแก้
+    //   3. คำขอนั้นเป็นของเจ้าของโพสต์ของหาย (กันปิดโพสต์หายของคนอื่น)
+    //   4. เป็นโพสต์ของหายจริง และยังไม่เคยถูกปิด
+    //      (สถานะปิด = 'returned_matched' ซึ่งไม่อยู่ใน query ของหน้า Home
+    //       ทำให้โพสต์หายที่คืนแล้วหายจากฟีดทันที ไม่ต้องรอ deploy หน้าเว็บ)
+    //   5. แก้ได้เฉพาะ status/resolvedAt/matchedClaimId (ห้ามแตะเนื้อหา/เจ้าของ/จุด)
+    //   6. ผู้แก้ = หัวหน้าแอดมิน หรือเจ้าหน้าที่ของจุดของ "โพสต์ของพบ" ในคำขอนั้น
+    function canCloseMatchedLostPost(matchedLostPostId) {
+      let claimId = request.resource.data.matchedClaimId;
+      let claimPath = /databases/$(database)/documents/claims/$(claimId);
+      return exists(claimPath) &&
+        'matchedClaimId' in request.resource.data &&
+        request.resource.data.matchedClaimId is string &&
+        get(claimPath).data.matchedPostId == matchedLostPostId &&
+        get(claimPath).data.status == 'approved' &&
+        get(claimPath).data.claimantId == resource.data.userId &&
+        get(claimPath).data.postId is string &&
+        // โพสต์ของพบที่คำขอนี้ผูกไว้ต้องมีอยู่จริง (ใช้จุดฝากของมันตรวจสิทธิ์เจ้าหน้าที่)
+        exists(/databases/$(database)/documents/posts/$(get(claimPath).data.postId)) &&
+        resource.data.itemType == 'lost' &&
+        request.resource.data.itemType == 'lost' &&
+        resource.data.status != 'returned_matched' &&
+        request.resource.data.status == 'returned_matched' &&
+        request.resource.data.diff(resource.data).affectedKeys().hasOnly([
+          'status', 'resolvedAt', 'matchedClaimId'
+        ]) &&
+        (isSuperAdmin(request.auth.uid) ||
+          (isStaffAdmin(request.auth.uid) &&
+            get(/databases/$(database)/documents/posts/$(get(claimPath).data.postId))
+              .data.depositLocation == staffPointName()));
+    }
+
     // เจ้าหน้าที่ประจำจุดจัดการโพสต์ที่จุดตัวเอง (ระงับ/กู้คืน/ปลดอายัด ที่หน้า "จัดการโพสต์")
     // แก้ได้เฉพาะ status (suspended/active) + suspendedAt — ห้ามแตะ userId/itemType/depositLocation/เนื้อหา
     function canStaffModeratePointPost() {
@@ -241,9 +277,9 @@ service cloud.firestore {
     }
 
 // =============================================
-    // users  - ข้อมูลส่วนตัวอ่านได้เฉพาะเจ้าของตัวเองหรือหัวหน้าแอดมิน
-    //          (user/เจ้าหน้าที่ ไม่สามารถดูข้อมูลส่วนตัวของ user อื่นได้)
-    // เขียนได้เฉพาะเจ้าของตัวเอง
+    // users  - ข้อมูลส่วนตัวอ่านได้เจ้าของตัวเอง แอดมินทุกระดับ (ดูอีเมล/ชื่อเพื่อติดต่อและบริหารคำขอได้)
+    //          user ทั่วไปอ่านของคนอื่นไม่ได้
+    // เขียนได้เฉพาะเจ้าของตัวเอง (หัวหน้าแอดมินเขียนได้ทุกฟิลด์ เช่น ban/unban/role)
     //   - ผู้ใช้แก้ชื่อ/เบอร์/อีเมล/avatar ได้ (ฟิลด์ปกติ)
     //   - role ตั้งได้เท่าที่ระบบอนุญาต (user เสมอ, super_admin เฉพาะ whitelist, admin เฉพาะมี adminAccounts)
     //   - ห้ามแก้ banned เอง (ให้หัวหน้าแอดมิน ban/unban)
@@ -251,7 +287,8 @@ service cloud.firestore {
     match /users/{uid} {
       allow read: if isLoggedIn() && (
         request.auth.uid == uid ||
-        isSuperAdmin(request.auth.uid)
+        isSuperAdmin(request.auth.uid) ||
+        isStaffAdmin(request.auth.uid)
       );
       allow create: if isLoggedIn() && request.auth.uid == uid &&
         !isBanned(request.auth.uid) &&
@@ -350,6 +387,7 @@ service cloud.firestore {
       allow update: if isLoggedIn() && (
         isSuperAdmin(request.auth.uid) ||
         canStaffApproveFoundPost() ||
+        canCloseMatchedLostPost(postId) ||
         canStaffModeratePointPost() ||
         canReserve(postId) ||
         (!isBanned(request.auth.uid) &&
@@ -435,16 +473,24 @@ service cloud.firestore {
       );
       // ผู้ขอสามารถลบคำขอ pending ของตัวเองเท่านั้น (ใช้ rollback เมื่อจองโพสต์ไม่สำเร็จ/ยกเลิกเอง)
       // — ห้ามลบคำขอที่ถูกพิจารณาแล้ว (approved/rejected/expired/post_deleted)
-      allow delete: if isLoggedIn() &&
-        resource.data.claimantId == request.auth.uid &&
-        resource.data.status == 'pending';
+      // แอดมิน: ลบรายการประวัติ (หน้า "ประวัติ") ได้ — หัวหน้าแอดมินทุกเคส,
+      // เจ้าหน้าที่เฉพาะคำขอที่จุดของตัวเอง (canStaffManageClaim)
+      // — ห้ามลบคำขอที่ยัง pending (อยู่หน้า "คำขอ" ยังไม่เข้าประวัติ และกำลังดำเนินการอยู่)
+      allow delete: if isLoggedIn() && (
+        (resource.data.claimantId == request.auth.uid &&
+          resource.data.status == 'pending') ||
+        (resource.data.status != 'pending' &&
+          (isSuperAdmin(request.auth.uid) ||
+            (isStaffAdmin(request.auth.uid) &&
+              resource.data.depositLocation == staffPointName())))
+      );
 
       // ---------------------------------------------------------
       // หลักฐานการส่งมอบ (รูปถ่ายผู้มารับของคู่กับของ) — 1 เอกสารต่อคำขอ
       //   - เขียน: เฉพาะแอดมินที่ดูแลจุดของคำขอนี้ และต้องเขียนตอน claim ยัง 'pending'
       //   - อ่าน: เฉพาะแอดมิน (ผู้ขออ่านไม่ได้ แม้เป็นเจ้าของ claim — ตาม requirement)
       //   - แก้/ลบ: ไม่ได้เด็ดขาดเมื่ออนุมัติแล้ว (กันแก้หลักฐานย้อนหลัง)
-      //         ลบได้เฉพาะตอน claim ยัง pending = ล้างหลักฐานกำพร้าเมื่ออนุมัติไม่สำเร็จ
+      // ลบได้เฉพาะตอน claim ยัง pending = ล้างหลักฐานกำพร้าเมื่ออนุมัติไม่สำเร็จ
       // ---------------------------------------------------------
       match /handover/{evidenceId} {
         allow create: if isLoggedIn() &&

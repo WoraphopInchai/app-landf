@@ -259,6 +259,7 @@ export default function Home({
             status: data.status || "active",
             createdAt: data.createdAt,
             resolvedAt: data.resolvedAt,
+            matchedClaimId: data.matchedClaimId,
             userId: data.userId || "",
             reporterName: data.reporterName || "ผู้ใช้งานทั่วไป",
             matches: data.matches || [],
@@ -272,6 +273,11 @@ export default function Home({
         const validPosts = fetchedPosts.filter((post) => {
           const itemStatus = post.status || "active";
           if (!allowedStatuses.includes(itemStatus)) return false;
+
+          // โพสต์ของหายที่ถูกจับคู่กับคำขอรับของที่อนุมัติแล้ว → ไม่ขึ้นใน Home อีก
+          // (ของชิ้นนี้ถูกคืนแล้ว มีโพสต์ของพบฝั่งที่ resolved เป็นตัวแทนอยู่แล้ว
+          //  ถ้าปล่อยไว้จะขึ้นซ้ำ 2 โพสต์ และจำนวน "คืนแล้ว" จะเกินจริง)
+          if (post.matchedClaimId) return false;
 
           if (itemStatus === "resolved" && post.resolvedAt) {
             const resolvedTime = resolveTime(post.resolvedAt);

@@ -57,6 +57,9 @@ export interface PostItem {
   inProgressAt?: FirestoreTimeLike;
   createdAt?: FirestoreTimeLike;
   resolvedAt?: FirestoreTimeLike;
+  // ID คำขอที่ทำให้โพสต์นี้ถูกปิด (เฉพาะโพสต์ของหายที่ผู้ขอเลือกตอนคืนของสำเร็จ)
+  // — ใช้กรองไม่ให้ขึ้นซ้ำในหน้า Home (โพสต์ของพบฝั่งที่คืนแล้วเป็นตัวแทน)
+  matchedClaimId?: string;
   date?: FirestoreTimeLike;
   time?: string;
   refCode?: string;

@@ -383,6 +383,8 @@ export default function MyItems({
   };
 
   const getStatusInfo = (item: PostDoc) => {
+    if (item.status === "returned_matched")
+      return { label: "พบเจ้าของแล้ว", color: "var(--sc-ok-fg)", bg: "var(--sc-ok-bg)", border: "var(--sc-ok-border)" };
     if (item.status === "resolved")
       return { label: "พบเจ้าของแล้ว", color: "var(--sc-ok-fg)", bg: "var(--sc-ok-bg)", border: "var(--sc-ok-border)" };
     if (item.status === "under_investigation")

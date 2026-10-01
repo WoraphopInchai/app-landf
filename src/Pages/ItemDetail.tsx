@@ -616,7 +616,8 @@ export default function ItemDetail({ item: initialItem, onBack, currentUser, onS
   }
 
   const isLost = item.itemType === "lost" || item.type === "lost";
-  const isResolved = item.status === "resolved";
+  // "returned_matched" = โพสต์ของหายที่ถูกจับคู่กับคำขอรับของที่อนุมัติแล้ว (เจ้าของได้รับของชิ้นนี้แล้ว)
+  const isResolved = item.status === "resolved" || item.status === "returned_matched";
 
   const isInvestigating = item.status === "under_investigation";
   const isInProgress = item.status === "in_progress";

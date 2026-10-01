@@ -154,6 +154,32 @@ async function loadHandoverEvidence(claimId: string | null | undefined): Promise
   }
 }
 
+/* โหลดโพสต์แบบปลอดภัย — คืน null ถ้าอ่านไม่ได้ (เช่น staff ต่างจุด) เพื่อไม่ให้หน้าจอพัง */
+async function loadPostDoc(id: string | null | undefined): Promise<PostItem | null> {
+  if (!id) return null;
+  try {
+    const snap = await getDoc(doc(db, "posts", id));
+    return snap.exists() ? ({ id: snap.id, ...snap.data() } as PostItem) : null;
+  } catch (e) {
+    console.error("Error loading post:", e);
+    return null;
+  }
+}
+
+/* ปิดโพสต์ของหายที่ผู้ขอเลือกตอนขอรับของ (หลังคำขอนั้นอนุมัติแล้ว)
+   ใช้ร่วมกันทั้งตอนอนุมัติใหม่ (confirmHandover) และปุ่มซ่อมเคสที่อนุมัติไปแล้วในหน้าประวัติ
+   — กฎ canCloseMatchedLostPost จะตรวจว่าคำขอ approved + matchedPostId ตรง + เป็นเจ้าของโพสต์นั้น */
+async function closeMatchedLostPostDoc(postId: string, claimId: string): Promise<void> {
+  await updateDoc(doc(db, "posts", postId), {
+    // "returned_matched" = โพสต์ของหายที่ถูกจับคู่กับคำขอที่อนุมัติแล้ว
+    // ตั้งใจให้ต่างจาก "resolved" เพราะ Home ดึง status in [active, in_progress, resolved, under_investigation]
+    // ถ้าใช้ resolved โพสต์หายจะยังโผล่ในฟีด (แท็บ "คืนแล้ว") จนกว่าจะ deploy หน้าเว็บ
+    status: "returned_matched",
+    resolvedAt: new Date().toISOString(),
+    matchedClaimId: claimId,
+  });
+}
+
 interface AdminReport {
   id: string;
   type?: string;
@@ -177,6 +203,682 @@ const resolveTime = (t?: FirestoreTimeLike): number => {
   if (typeof t.toDate === "function") return t.toDate().getTime();
   return 0;
 };
+
+/* =========================================================
+   ทางลัด "ดู/จัดการผู้ใช้" จากทุกแท็บ
+   - คลิกชื่อ/อีเมลที่ใดก็ได้ → เปิดการ์ดผู้ใช้ชุดเดียวกัน ไม่ต้องไปกดที่แท็บ "จัดการผู้ใช้"
+   - อ่านข้อมูลผู้ใช้จาก users/{uid} โดยตรง (กฎอนุญาตให้แอดมินทุกระดับอ่านได้)
+   ========================================================= */
+
+const ROLE_LABEL: Record<string, string> = {
+  super_admin: "หัวหน้าแอดมิน",
+  admin: "เจ้าหน้าที่ประจำจุด",
+  user: "ผู้ใช้ทั่วไป",
+};
+
+interface AdminUserProfile extends AdminUser {
+  adminPoint?: string | null;
+}
+
+/** ชื่อ/อีเมลที่กดได้ — เปิดการ์ดผู้ใช้ทันที */
+function UserLink({
+  value,
+  fallback,
+  onClick,
+  icon,
+}: {
+  value?: string | null;
+  fallback?: string;
+  onClick?: () => void;
+  icon?: React.ReactNode;
+}) {
+  const text = (value || "").trim() || fallback || "ไม่ระบุ";
+  const clickable = !!onClick;
+  return (
+    <span
+      role={clickable ? "button" : undefined}
+      tabIndex={clickable ? 0 : undefined}
+      title={clickable ? "คลิกเพื่อดู/จัดการผู้ใช้" : undefined}
+      onClick={clickable ? (e) => { e.stopPropagation(); onClick(); } : undefined}
+      onKeyDown={
+        clickable
+          ? (e) => {
+              if (e.key === "Enter" || e.key === " ") {
+                e.preventDefault();
+                e.stopPropagation();
+                onClick?.();
+              }
+            }
+          : undefined
+      }
+      style={{
+        display: "inline-flex",
+        alignItems: "center",
+        gap: "4px",
+        cursor: clickable ? "pointer" : "default",
+        color: clickable ? "var(--fg-accent)" : "inherit",
+        fontWeight: clickable ? 700 : "inherit",
+        textDecoration: clickable ? "underline" : "none",
+        textUnderlineOffset: "2px",
+        wordBreak: "break-word",
+      }}
+    >
+      {icon}
+      {text}
+    </span>
+  );
+}
+
+/* แคชข้อมูลผู้ใช้ไว้ในหน่วยความจำ เพื่อไม่ให้ยิง Firestore ซ้ำทุกครั้งที่เปิดรายการ */
+const userInfoCache = new Map<string, { name?: string | null; email?: string | null; banned?: boolean }>();
+
+function useUserInfo(uid?: string | null) {
+  const [fetchedUid, setFetchedUid] = useState<string | null>(null);
+  const [info, setInfo] = useState<{ name?: string | null; email?: string | null; banned?: boolean } | null>(null);
+
+  // เปลี่ยนคนที่กำลังดู → ล้างค่าค้างเดิมทันที (ปรับ state ระหว่าง render ตามแนวทาง React)
+  if (fetchedUid !== (uid ?? null)) {
+    setFetchedUid(uid ?? null);
+    setInfo(uid ? userInfoCache.get(uid) ?? null : null);
+  }
+
+  useEffect(() => {
+    if (!uid) return;
+    if (userInfoCache.has(uid)) return;
+    let cancelled = false;
+    getDoc(doc(db, "users", uid))
+      .then((snap) => {
+        const data = (snap.exists() ? snap.data() : {}) as AppUser & { banned?: boolean };
+        const entry = { name: data.name ?? data.displayName, email: data.email, banned: data.banned === true };
+        userInfoCache.set(uid, entry);
+        if (!cancelled) setInfo(entry);
+      })
+      .catch((e) => {
+        console.error("Error loading user info:", e);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [uid]);
+
+  return info;
+}
+
+/** ชื่อ + อีเมลของผู้ใช้ที่กดได้ทั้งสองช่อง (เปิดทางลัดจัดการผู้ใช้) */
+function UserIdentity({
+  uid,
+  name,
+  email,
+  onOpen,
+  size = "md",
+}: {
+  uid?: string | null;
+  name?: string | null;
+  email?: string | null;
+  onOpen?: (uid: string) => void;
+  size?: "sm" | "md";
+}) {
+  const info = useUserInfo(uid);
+  const open = uid && onOpen ? () => onOpen(uid) : undefined;
+  const displayName = (name || info?.name || "").trim() || "ไม่ระบุชื่อ";
+  const displayEmail = (email || info?.email || "").trim() || "ไม่ระบุอีเมล";
+  const isBanned = info?.banned === true;
+
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: "2px", minWidth: 0 }}>
+      <span style={{ display: "flex", alignItems: "center", gap: "5px", flexWrap: "wrap" }}>
+        <UserLink value={displayName} onClick={open} icon={<User size={size === "sm" ? 12 : 14} style={{ flexShrink: 0 }} />} />
+        {isBanned && (
+          <span
+            style={{
+              fontSize: "11px", fontWeight: 700, padding: "1px 7px", borderRadius: "6px",
+              color: "var(--sc-danger-fg)", backgroundColor: "var(--sc-danger-bg)",
+            }}
+          >
+            ถูกแบน
+          </span>
+        )}
+      </span>
+      <span style={{ display: "flex", alignItems: "center", gap: "5px", minWidth: 0 }}>
+        <UserLink value={displayEmail} onClick={open} icon={<Mail size={size === "sm" ? 12 : 14} style={{ flexShrink: 0 }} />} />
+      </span>
+    </div>
+  );
+}
+
+/** ป้ายสถานะโพสต์แบบอ่านง่าย (ใช้ร่วมกันทุกการ์ดในฝั่งแอดมิน) */
+const POST_STATUS_META: Record<string, { label: string; fg: string; bg: string }> = {
+  resolved: { label: "คืนแล้ว", fg: "var(--sc-ok-fg)", bg: "var(--sc-ok-bg)" },
+  returned_matched: { label: "คืนแล้ว (จับคู่กับโพสต์ของพบ)", fg: "var(--sc-ok-fg)", bg: "var(--sc-ok-bg)" },
+  suspended: { label: "ถูกระงับ", fg: "var(--sc-danger-fg)", bg: "var(--sc-danger-bg)" },
+  under_investigation: { label: "อยู่ระหว่างอายัด", fg: "var(--sc-warn-fg)", bg: "var(--sc-warn-bg)" },
+  in_progress: { label: "ดำเนินการ", fg: "var(--sc-info-fg)", bg: "var(--sc-info-bg)" },
+  expired: { label: "หมดอายุ", fg: "var(--sc-danger-fg)", bg: "var(--sc-danger-bg)" },
+  pending: { label: "รอตรวจสอบ", fg: "var(--sc-warn-fg)", bg: "var(--sc-warn-bg)" },
+  rejected: { label: "ไม่ผ่าน", fg: "var(--sc-danger-fg)", bg: "var(--sc-danger-bg)" },
+  active: { label: "ใช้งาน", fg: "var(--sc-ok-fg)", bg: "var(--sc-ok-bg)" },
+};
+
+function postStatusMeta(status?: string) {
+  return POST_STATUS_META[status || "active"] || { label: status || "ไม่ระบุ", fg: "var(--fg-secondary)", bg: "var(--bg-hover)" };
+}
+
+/** ชุดข้อมูลโพสต์แบบครบถ้วน (ใช้ร่วมกันในทุกแท็บที่เปิดดูรายละเอียดโพสต์) */
+function PostFactsGrid({ post }: { post: PostItem }) {
+  const st = postStatusMeta(post.status);
+  return (
+    <InfoGrid>
+      <InfoRow icon={Activity} label="สถานะโพสต์" value={st.label} color={st.fg} bg={st.bg} />
+      <InfoRow
+        icon={ShieldAlert}
+        label="จุดฝาก/คืนของ"
+        value={post.depositLocation || "ไม่ระบุ"}
+        color={post.depositLocation ? "var(--sc-ok-fg)" : undefined}
+        bg={post.depositLocation ? "var(--sc-ok-bg)" : undefined}
+      />
+      <InfoRow
+        icon={MapPin}
+        label="สถานที่"
+        value={post.locationName || post.location || post.building || "ไม่ระบุ"}
+      />
+      {(post.category || post.faculty) && (
+        <InfoRow
+          icon={GraduationCap}
+          label="ประเภท / คณะ"
+          value={[post.category, post.faculty].filter(Boolean).join(" · ")}
+        />
+      )}
+      {post.refCode && <InfoRow icon={IdCard} label="รหัสอ้างอิง" value={post.refCode} />}
+      {post.securityZone && (
+        <InfoRow icon={ShieldCheck} label="พื้นที่ความปลอดภัย" value={post.securityZone} />
+      )}
+      <InfoRow
+        icon={Clock}
+        label="วันที่พบ / เวลา"
+        value={[formatDateShort(post.date), formatClockTime(post.createdAt)]
+          .filter(Boolean).join(" ") || "-"}
+      />
+      <InfoRow icon={Clock} label="ส่งโพสต์เมื่อ" value={formatTime(post.createdAt) || "-"} />
+      {post.inProgressAt && (
+        <InfoRow icon={Activity} label="เริ่มดำเนินการ" value={formatTime(post.inProgressAt) || "-"} />
+      )}
+      {post.resolvedAt && (
+        <InfoRow icon={CheckCircle2} label="ปิดเคสเมื่อ" value={formatTime(post.resolvedAt) || "-"} />
+      )}
+      {post.reservationClaimId && (
+        <InfoRow
+          icon={PackageCheck}
+          label="คำขอที่กำลังจอง"
+          value={post.reservationClaimId}
+          color="var(--sc-warn-fg)"
+          bg="var(--sc-warn-bg)"
+        />
+      )}
+      <InfoRow
+        icon={IdCard}
+        label="Post ID"
+        value={post.id || "-"}
+      />
+      <InfoRow
+        icon={User}
+        label="ผู้แจ้ง (จากโพสต์)"
+        value={post.reporterName || post.reporter || "ไม่ระบุ"}
+      />
+      {post.reporterPhone && (
+        <InfoRow icon={Phone} label="เบอร์โทรผู้แจ้ง (จากโพสต์)" value={post.reporterPhone} />
+      )}
+    </InfoGrid>
+  );
+}
+
+/** การ์ดโพสต์แบบคู่ (ใช้ในประวัติ: โพสต์พบ + โพสต์หายที่ผู้ขอเลือก) */
+function PairedPostCard({
+  post,
+  label,
+  onOpen,
+}: {
+  post: PostItem;
+  label: string;
+  onOpen: () => void;
+}) {
+  const cover = getPostCover(post) || "";
+  const st = postStatusMeta(post.status);
+  return (
+    <div style={{
+      border: "1px solid var(--border)", borderRadius: "12px", overflow: "hidden",
+      backgroundColor: "var(--bg-card)", display: "flex", flexDirection: "column",
+    }}>
+      {cover ? (
+        <img
+          src={cover}
+          alt=""
+          style={{ width: "100%", height: "150px", objectFit: "cover", display: "block", borderBottom: "1px solid var(--border)" }}
+        />
+      ) : (
+        <div style={{
+          height: "72px", backgroundColor: "var(--bg-hover)", display: "flex",
+          alignItems: "center", justifyContent: "center", borderBottom: "1px solid var(--border)",
+        }}>
+          <PackageSearch size={20} color="var(--fg-faint)" />
+        </div>
+      )}
+      <div style={{ padding: "12px 13px", display: "flex", flexDirection: "column", gap: "7px", flex: 1 }}>
+        <div style={{ display: "flex", gap: "6px", flexWrap: "wrap", alignItems: "center" }}>
+          <span style={{
+            fontSize: "10px", fontWeight: 700, padding: "2px 8px", borderRadius: "6px",
+            backgroundColor: "var(--sc-brand-bg)", color: "var(--sc-brand-fg)", border: "1px solid var(--sc-brand-border)",
+          }}>
+            {label}
+          </span>
+          <span style={{
+            fontSize: "10px", fontWeight: 700, padding: "2px 8px", borderRadius: "6px",
+            backgroundColor: post.itemType === "lost" ? "var(--sc-warn-bg)" : "var(--sc-ok-bg)",
+            color: post.itemType === "lost" ? "var(--sc-warn-fg)" : "var(--sc-ok-fg)",
+          }}>
+            {post.itemType === "lost" ? "โพสต์ของหาย" : "โพสต์ของพบ"}
+          </span>
+          <span style={{
+            fontSize: "10px", fontWeight: 700, padding: "2px 8px", borderRadius: "6px",
+            backgroundColor: st.bg, color: st.fg,
+          }}>
+            {st.label}
+          </span>
+        </div>
+        <div style={{ fontSize: "14px", fontWeight: 800, color: "var(--fg)", wordBreak: "break-word" }}>
+          {post.title}
+        </div>
+        <div style={{ fontSize: "11.5px", color: "var(--fg-muted)", lineHeight: 1.5 }}>
+          {post.locationName || post.location || post.building || "ไม่ระบุสถานที่"}
+        </div>
+        {post.depositLocation && (
+          <div style={{ fontSize: "11.5px", color: "var(--sc-ok-fg)" }}>
+            จุดฝาก: {post.depositLocation}
+          </div>
+        )}
+        <button
+          onClick={onOpen}
+          style={{
+            marginTop: "auto", padding: "8px 10px", borderRadius: "8px", border: "1px solid var(--border)",
+            backgroundColor: "var(--bg-hover)", color: "var(--fg-strong)", fontSize: "12px", fontWeight: 700,
+            cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", gap: "5px",
+          }}
+        >
+          <Eye size={14} /> ดูรายละเอียดโพสต์
+        </button>
+      </div>
+    </div>
+  );
+}
+
+/** การ์ดผู้ใช้แบบลอย (ทางลัด) — ใช้ร่วมกันทุกแท็บ */
+function AdminUserSheet({
+  userId,
+  onClose,
+  zIndex = 300,
+  canManage,
+  onManageUsers,
+}: {
+  userId: string | null;
+  onClose: () => void;
+  zIndex?: number;
+  /** true = หัวหน้าแอดมิน (แบน/ปลดแบน + เปิดหน้าจัดการผู้ใช้ได้) */
+  canManage?: boolean;
+  onManageUsers?: (uid: string) => void;
+}) {
+  const [profile, setProfile] = useState<AdminUserProfile | null>(null);
+  const [loading, setLoading] = useState(false);
+  const [loadError, setLoadError] = useState("");
+  const [posts, setPosts] = useState<PostItem[]>([]);
+  const [claims, setClaims] = useState<AdminClaim[]>([]);
+  const [busy, setBusy] = useState(false);
+  const [confirmBan, setConfirmBan] = useState(false);
+
+  // สลับคน → ล้างข้อมูลเก่าทันที (ปรับ state ระหว่าง render ตามแนวทาง React)
+  const [loadedUid, setLoadedUid] = useState<string | null>(null);
+  if (loadedUid !== (userId ?? null)) {
+    setLoadedUid(userId ?? null);
+    setLoading(!!userId);
+    setLoadError("");
+    setProfile(null);
+    setPosts([]);
+    setClaims([]);
+    setConfirmBan(false);
+  }
+
+  useEffect(() => {
+    if (!userId) return;
+    let cancelled = false;
+    (async () => {
+      try {
+        const snap = await getDoc(doc(db, "users", userId));
+        if (cancelled) return;
+        setProfile(snap.exists() ? ({ id: snap.id, ...snap.data() } as AdminUserProfile) : null);
+        if (!snap.exists()) setLoadError("ไม่พบข้อมูลผู้ใช้ในระบบ (อาจเป็นผู้ใช้ที่ยังไม่ได้เข้าระบบ)");
+      } catch (e) {
+        console.error("Error loading user profile:", e);
+        if (!cancelled) setLoadError("โหลดข้อมูลผู้ใช้ไม่สำเร็จ (ไม่มีสิทธิ์อ่าน)");
+      } finally {
+        if (!cancelled) setLoading(false);
+      }
+      // กิจกรรมของผู้ใช้ (โพสต์/คำขอ) — อ่านไม่ได้บางกรณีก็ไม่ทำให้หน้าจอพัง
+      const safe = async <T,>(fn: () => Promise<T>, apply: (v: T) => void) => {
+        try {
+          const v = await fn();
+          if (!cancelled) apply(v);
+        } catch (e) {
+          console.error("Error loading user activity:", e);
+        }
+      };
+      await safe(
+        async () =>
+          getDocs(
+            query(collection(db, "posts"), where("userId", "==", userId), limit(20))
+          ).then((s) => s.docs.map((d) => ({ id: d.id, ...d.data() }) as PostItem)),
+        setPosts
+      );
+      await safe(
+        async () =>
+          getDocs(
+            query(collection(db, "claims"), where("claimantId", "==", userId), limit(20))
+          ).then((s) => s.docs.map((d) => ({ id: d.id, ...d.data() }) as AdminClaim)),
+        setClaims
+      );
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [userId]);
+
+  const runBan = async () => {
+    if (!profile) return;
+    setBusy(true);
+    try {
+      if (profile.banned) {
+        await updateDoc(doc(db, "users", profile.id), { banned: false });
+        setProfile({ ...profile, banned: false });
+        showToast("ปลดแบนผู้ใช้แล้ว", "success");
+      } else {
+        await banUserAccount(profile.id);
+        setProfile({ ...profile, banned: true });
+        showToast("แบนผู้ใช้แล้ว (โพสต์ทั้งหมดถูกระงับ)", "success");
+      }
+      setConfirmBan(false);
+    } catch (e) {
+      console.error(e);
+      showToast("ทำรายการไม่สำเร็จ กรุณาลองใหม่", "error");
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const name = profile?.name || "ไม่ระบุชื่อ";
+  const email = profile?.email || "-";
+
+  return (
+    <>
+      <ReviewSheet
+        open={!!userId}
+        onClose={onClose}
+        title="ข้อมูลผู้ใช้"
+        subtitle={name}
+        zIndex={zIndex}
+        maxWidth={720}
+        busy={busy}
+        badge={
+          profile
+            ? profile.banned
+              ? { label: "บัญชีถูกระงับ", bg: "var(--sc-danger-bg)", color: "var(--sc-danger-fg)" }
+              : { label: "ปกติ", bg: "var(--sc-ok-bg)", color: "var(--sc-ok-fg)" }
+            : undefined
+        }
+        footer={
+          <>
+            {canManage && profile && (
+              <>
+                {profile.banned ? (
+                  <SheetButton tone="ok" icon={ShieldCheck} disabled={busy} onClick={runBan}>
+                    ปลดแบน
+                  </SheetButton>
+                ) : (
+                  <SheetButton tone="danger" icon={Ban} disabled={busy} onClick={() => setConfirmBan(true)}>
+                    แบนผู้ใช้
+                  </SheetButton>
+                )}
+                {onManageUsers && (
+                  <SheetButton
+                    icon={Users}
+                    onClick={() => {
+                      onClose();
+                      onManageUsers(profile.id);
+                    }}
+                  >
+                    จัดการผู้ใช้
+                  </SheetButton>
+                )}
+              </>
+            )}
+            <SheetButton onClick={onClose}>ปิด</SheetButton>
+          </>
+        }
+      >
+        {loading ? (
+          <div style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: "8px", padding: "24px", color: "var(--fg-muted)", fontSize: "13px" }}>
+            <Loader2 size={16} style={{ animation: "spin 1s linear infinite" }} /> กำลังโหลดข้อมูลผู้ใช้...
+          </div>
+        ) : (
+          <>
+            <div style={{ display: "flex", alignItems: "center", gap: "14px", flexWrap: "wrap" }}>
+              <div
+                style={{
+                  width: "64px", height: "64px", borderRadius: "50%", flexShrink: 0,
+                  background: profile?.banned
+                    ? "linear-gradient(135deg, #dc2626, #ef4444)"
+                    : "linear-gradient(135deg, #7c5cfc, #4f3bd6)",
+                  display: "flex", alignItems: "center", justifyContent: "center",
+                  color: "var(--fg)", fontSize: "24px", fontWeight: 800,
+                  border: "3px solid var(--border-strong)", boxShadow: "0 4px 14px rgba(0,0,0,0.4)",
+                }}
+              >
+                {(profile?.name || profile?.email || "?").charAt(0).toUpperCase()}
+              </div>
+              <div style={{ minWidth: 0 }}>
+                <div style={{ fontSize: "20px", fontWeight: 800, color: "var(--fg)", wordBreak: "break-word" }}>
+                  {name}
+                </div>
+                <div style={{ fontSize: "13.5px", color: "var(--fg-muted)", wordBreak: "break-all" }}>
+                  {email}
+                </div>
+              </div>
+            </div>
+
+            {loadError && (
+              <div
+                style={{
+                  padding: "10px 12px", backgroundColor: "var(--sc-danger-bg)",
+                  border: "1px solid var(--sc-danger-border)", borderRadius: "10px",
+                  fontSize: "12.5px", color: "var(--sc-danger-fg)",
+                }}
+              >
+                {loadError}
+              </div>
+            )}
+
+            {profile && (
+              <InfoGrid>
+                <InfoRow icon={Mail} label="อีเมล" value={email} />
+                <InfoRow icon={User} label="ชื่อที่แสดง" value={name} />
+                <InfoRow
+                  icon={ShieldCheck}
+                  label="สิทธิ์"
+                  value={ROLE_LABEL[profile.role || "user"] || profile.role || "ผู้ใช้ทั่วไป"}
+                />
+                {profile.adminPoint && (
+                  <InfoRow icon={MapPin} label="จุดประจำ" value={profile.adminPoint} />
+                )}
+                <InfoRow
+                  icon={Phone}
+                  label="เบอร์โทร"
+                  value={profile.phoneNumber || profile.phone || "-"}
+                />
+                <InfoRow
+                  icon={IdCard}
+                  label="User ID"
+                  value={userId || "-"}
+                />
+                <InfoRow icon={Clock} label="เข้าร่วมเมื่อ" value={formatTime(profile.createdAt) || formatDateShort(profile.createdAt) || "-"} />
+                <InfoRow
+                  icon={profile.banned ? Ban : ShieldCheck}
+                  label="สถานะ"
+                  value={profile.banned ? `ถูกแบน${profile.bannedAt ? ` · ${formatDateShort(profile.bannedAt)}` : ""}` : "ปกติ"}
+                  color={profile.banned ? "var(--sc-danger-fg)" : "var(--sc-ok-fg)"}
+                  bg={profile.banned ? "var(--sc-danger-bg)" : "var(--sc-ok-bg)"}
+                />
+              </InfoGrid>
+            )}
+
+            {!canManage && (
+              <div
+                style={{
+                  padding: "10px 12px", backgroundColor: "var(--sc-info-bg)",
+                  border: "1px solid var(--sc-info-border)", borderRadius: "10px",
+                  fontSize: "12.5px", color: "var(--sc-info-fg)",
+                }}
+              >
+                การแบน/ปลดแบนและการเปลี่ยนสิทธิ์ ทำได้โดยหัวหน้าแอดมินเท่านั้น
+              </div>
+            )}
+
+            <div>
+              <div style={{ fontSize: "14px", fontWeight: 700, color: "var(--fg)", marginBottom: "8px" }}>
+                โพสต์ของผู้ใช้ <span style={{ color: "var(--fg-accent)" }}>({posts.length})</span>
+              </div>
+              {posts.length === 0 ? (
+                <div style={{ fontSize: "13px", color: "var(--fg-faint)", padding: "10px 0" }}>
+                  ไม่มีโพสต์ (หรือไม่มีสิทธิ์ดูโพสต์ของผู้ใช้รายนี้)
+                </div>
+              ) : (
+                <div
+                  style={{
+                    maxHeight: "220px", overflowY: "auto", borderRadius: "12px",
+                    border: "1px solid var(--border)", backgroundColor: "var(--bg-hover)",
+                  }}
+                >
+                  {posts.map((p) => (
+                    <div
+                      key={p.id}
+                      style={{
+                        display: "flex", alignItems: "center", gap: "10px",
+                        padding: "10px 12px", borderBottom: "1px solid var(--border)",
+                      }}
+                    >
+                      {(getPostCover(p) || "") && (
+                        <img
+                          src={getPostCover(p) || ""}
+                          alt=""
+                          style={{
+                            width: "36px", height: "36px", borderRadius: "8px",
+                            objectFit: "cover", flexShrink: 0, border: "1px solid var(--border)",
+                          }}
+                        />
+                      )}
+                      <div style={{ flex: 1, minWidth: 0 }}>
+                        <div style={{ fontSize: "13.5px", fontWeight: 600, color: "var(--fg)", wordBreak: "break-word" }}>
+                          {p.title}
+                        </div>
+                        <div style={{ fontSize: "12px", color: "var(--fg-faint)", wordBreak: "break-all" }}>
+                          {p.itemType === "lost" ? "ของหาย" : "พบของ"} · {p.id}
+                        </div>
+                      </div>
+                      <span
+                        style={{
+                          flexShrink: 0, fontSize: "12px", fontWeight: 700, padding: "3px 9px", borderRadius: "7px",
+                          color: p.status === "resolved" ? "var(--sc-ok-fg)"
+                            : p.status === "suspended" ? "var(--sc-danger-fg)"
+                            : p.status === "under_investigation" ? "var(--sc-warn-fg)"
+                            : p.status === "in_progress" ? "var(--sc-info-fg)" : "var(--sc-ok-fg)",
+                          backgroundColor: p.status === "resolved" ? "var(--sc-ok-bg)"
+                            : p.status === "suspended" ? "var(--sc-danger-bg)"
+                            : p.status === "under_investigation" ? "var(--sc-warn-bg)"
+                            : p.status === "in_progress" ? "var(--sc-info-bg)" : "var(--sc-ok-bg)",
+                        }}
+                      >
+                        {p.status === "resolved" ? "คืนแล้ว"
+                          : p.status === "suspended" ? "ถูกระงับ"
+                          : p.status === "under_investigation" ? "อายัด"
+                          : p.status === "in_progress" ? "ดำเนินการ" : "ใช้งาน"}
+                      </span>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+
+            <div>
+              <div style={{ fontSize: "14px", fontWeight: 700, color: "var(--fg)", marginBottom: "8px" }}>
+                คำขอรับของ <span style={{ color: "var(--sc-warn-fg)" }}>({claims.length})</span>
+              </div>
+              {claims.length === 0 ? (
+                <div style={{ fontSize: "13px", color: "var(--fg-faint)", padding: "10px 0" }}>
+                  ยังไม่เคยยื่นคำขอ (หรือไม่มีสิทธิ์ดูคำขอของผู้ใช้รายนี้)
+                </div>
+              ) : (
+                <div
+                  style={{
+                    maxHeight: "220px", overflowY: "auto", borderRadius: "12px",
+                    border: "1px solid var(--border)", backgroundColor: "var(--bg-hover)",
+                  }}
+                >
+                  {claims.map((c) => {
+                    const b = getStatusBadge(c);
+                    return (
+                      <div
+                        key={c.id}
+                        style={{
+                          display: "flex", alignItems: "center", gap: "10px",
+                          padding: "10px 12px", borderBottom: "1px solid var(--border)",
+                        }}
+                      >
+                        <div style={{ flex: 1, minWidth: 0 }}>
+                          <div style={{ fontSize: "13.5px", fontWeight: 600, color: "var(--fg)", wordBreak: "break-word" }}>
+                            {c.postTitle || "โพสต์ไม่ระบุชื่อ"}
+                          </div>
+                          <div style={{ fontSize: "12px", color: "var(--fg-faint)", wordBreak: "break-all" }}>
+                            {formatDateShort(c.createdAt) || "-"} · {c.id}
+                          </div>
+                        </div>
+                        <span
+                          style={{
+                            flexShrink: 0, fontSize: "12px", fontWeight: 700, padding: "3px 9px",
+                            borderRadius: "7px", color: b.color, backgroundColor: b.bg,
+                          }}
+                        >
+                          {b.label}
+                        </span>
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+            </div>
+          </>
+        )}
+      </ReviewSheet>
+
+      {confirmBan && profile && (
+        <ConfirmModal
+          open
+          title="ยืนยันแบนผู้ใช้"
+          message={`ยืนยันแบน "${name}"? โพสต์ทั้งหมดของผู้ใช้รายนี้จะถูกระงับ และเขาจะเข้าใช้งานไม่ได้จนกว่าจะปลดแบน`}
+          confirmText="แบนผู้ใช้"
+          variant="danger"
+          busy={busy}
+          onConfirm={runBan}
+          onCancel={() => !busy && setConfirmBan(false)}
+        />
+      )}
+    </>
+  );
+}
 
 const formatDateShort = (d?: FirestoreTimeLike): string => {
   const t = resolveTime(d);
@@ -511,6 +1213,31 @@ export default function Admin({ currentUser, onLogout, initialTab, adminRole, ad
   const isSuper = adminRole === "super_admin";
   const isStaff = adminRole === "admin";
 
+  // ทางลัดจากการ์ดผู้ใช้ → ข้ามไปแท็บ "จัดการผู้ใช้" แล้วเปิดการ์ดของคนนั้นทันที
+  const [focusUser, setFocusUser] = useState<AdminUser | null>(null);
+  const openUserManager = (uid: string) => {
+    setActiveTab("users");
+    const inList = users.find((u) => u.id === uid);
+    if (inList) {
+      setFocusUser(inList);
+      return;
+    }
+    // ไม่อยู่ใน 200 คนแรก → ดึงจาก Firestore โดยตรง (ทำใน event handler เพื่อไม่ยิงซ้ำทุก render)
+    setFocusUser(null);
+    getDoc(doc(db, "users", uid))
+      .then((snap) => {
+        if (snap.exists()) {
+          setFocusUser({ id: snap.id, ...snap.data() } as AdminUser);
+        } else {
+          showToast("ไม่พบข้อมูลผู้ใช้รายนี้", "error");
+        }
+      })
+      .catch((e) => {
+        console.error("Error loading user for management:", e);
+        showToast("เปิดข้อมูลผู้ใช้ไม่สำเร็จ", "error");
+      });
+  };
+
   // จำนวนคำขอรับของที่ค้างอยู่ (badge บนแท็บ "คำขอรับของ" + หน้าแรก)
   const [pendingClaimsCount, setPendingClaimsCount] = useState(0);
   useEffect(() => {
@@ -798,6 +1525,8 @@ export default function Admin({ currentUser, onLogout, initialTab, adminRole, ad
               <AdminFoundApprovals
                 posts={posts}
                 adminPoint={isStaff ? adminPoint : null}
+                isSuper={isSuper}
+                onManageUsers={isSuper ? openUserManager : undefined}
               />
             )}
             {activeTab === "claims" && (
@@ -805,17 +1534,29 @@ export default function Admin({ currentUser, onLogout, initialTab, adminRole, ad
                 adminUid={currentUser?.uid || ""}
                 adminPoint={isStaff ? adminPoint : null}
                 isStaff={isStaff}
+                isSuper={isSuper}
+                onManageUsers={isSuper ? openUserManager : undefined}
               />
             )}
             {activeTab === "history" && (
               <AdminHistory
                 isStaff={isStaff}
                 adminPoint={isStaff ? adminPoint : null}
+                isSuper={isSuper}
+                onManageUsers={isSuper ? openUserManager : undefined}
               />
             )}
-            {activeTab === "posts" && <AdminPosts posts={posts} />}
+            {activeTab === "posts" && (
+              <AdminPosts
+                posts={posts}
+                isSuper={isSuper}
+                onManageUsers={isSuper ? openUserManager : undefined}
+              />
+            )}
             {isSuper && activeTab === "reports" && <AdminReports />}
-            {isSuper && activeTab === "users" && <AdminUsers users={users} />}
+            {isSuper && activeTab === "users" && (
+              <AdminUsers users={users} focusUser={focusUser} />
+            )}
             {isSuper && activeTab === "manage-admins" && <AdminManageAdmins isSuper={isSuper} />}
             {isStaff && (activeTab === "reports" || activeTab === "users" || activeTab === "manage-admins") && (
               <AdminOverview
@@ -1123,9 +1864,13 @@ function AdminOverview({
 function AdminFoundApprovals({
   posts,
   adminPoint,
+  isSuper,
+  onManageUsers,
 }: {
   posts: PostItem[];
   adminPoint?: string | null;
+  isSuper?: boolean;
+  onManageUsers?: (uid: string) => void;
 }) {
   const [confirmDialog, setConfirmDialog] = useState<{
     title: string;
@@ -1138,6 +1883,8 @@ function AdminFoundApprovals({
   const [selectedPost, setSelectedPost] = useState<PostItem | null>(null);
   const [postZoom, setPostZoom] = useState<string | null>(null);
   const [processingId, setProcessingId] = useState<string | null>(null);
+  // ทางลัดดู/จัดการผู้ใช้ — กดที่ชื่อหรืออีเมลของผู้พบได้เลย
+  const [quickUserId, setQuickUserId] = useState<string | null>(null);
 
   const pending = posts.filter(
     (p) =>
@@ -1278,7 +2025,13 @@ function AdminFoundApprovals({
                   {post.title}
                 </div>
                 <div style={{ fontSize: "11px", color: "var(--fg-muted)", marginTop: 2 }}>
-                  ผู้พบ: {post.reporterName || "ไม่ระบุ"} · {formatDateShort(post.createdAt) || "-"}
+                  ผู้พบ:{" "}
+                  <UserLink
+                    value={post.reporterName}
+                    fallback="ไม่ระบุชื่อ"
+                    onClick={post.userId || post.uid ? () => setQuickUserId((post.userId || post.uid) as string) : undefined}
+                  />{" "}
+                  · {formatDateShort(post.createdAt) || "-"}
                 </div>
                 <div style={{ fontSize: "11px", color: "var(--fg-secondary)", marginTop: 2 }}>
                   จุดฝากของ: {post.depositLocation || post.locationName || "ไม่ระบุ"}
@@ -1387,6 +2140,25 @@ function AdminFoundApprovals({
             </div>
           )}
 
+          <div style={{
+            display: "flex", alignItems: "center", gap: "10px", flexWrap: "wrap",
+            padding: "11px 13px", borderRadius: "12px",
+            border: "1px solid var(--border)", backgroundColor: "var(--bg-hover)",
+          }}>
+            <span style={{
+              fontSize: "12px", fontWeight: 700, color: "var(--fg-accent)",
+              display: "flex", alignItems: "center", gap: "6px", flexShrink: 0,
+            }}>
+              <User size={14} /> ผู้พบ / เจ้าของโพสต์
+            </span>
+            <UserIdentity
+              uid={selectedPost.userId || selectedPost.uid}
+              name={selectedPost.reporterName || selectedPost.reporter}
+              onOpen={(uid) => setQuickUserId(uid)}
+              size="sm"
+            />
+          </div>
+
           <InfoGrid>
             <InfoRow icon={User} label="ผู้พบ" value={selectedPost.reporterName || "ไม่ระบุ"} />
             {selectedPost.reporterPhone && (
@@ -1463,6 +2235,15 @@ function AdminFoundApprovals({
           }}
         />
       )}
+
+      {/* ทางลัดดู/จัดการผู้ใช้ — เปิดจากชื่อหรืออีเมลของผู้พบ */}
+      <AdminUserSheet
+        userId={quickUserId}
+        onClose={() => setQuickUserId(null)}
+        zIndex={320}
+        canManage={isSuper}
+        onManageUsers={onManageUsers}
+      />
     </div>
   );
 }
@@ -1474,10 +2255,14 @@ function AdminClaims({
   adminUid,
   adminPoint,
   isStaff,
+  isSuper,
+  onManageUsers,
 }: {
   adminUid?: string;
   adminPoint?: string | null;
   isStaff?: boolean;
+  isSuper?: boolean;
+  onManageUsers?: (uid: string) => void;
 }) {
   const [claims, setClaims] = useState<AdminClaim[]>([]);
   const [searchText, setSearchText] = useState("");
@@ -1500,6 +2285,8 @@ function AdminClaims({
     variant?: "danger" | "primary";
     onConfirm: () => void;
   } | null>(null);
+  // ทางลัดดู/จัดการผู้ใช้ — กดที่ชื่อหรืออีเมลของผู้ขอรับของได้เลย
+  const [quickUserId, setQuickUserId] = useState<string | null>(null);
 
   // เมื่อแอดมินเข้าดูหน้า "คำขอรับของ" ให้ mark การแจ้งเตือนที่เกี่ยวข้องเป็น "อ่านแล้ว"
   useEffect(() => {
@@ -1668,12 +2455,16 @@ function AdminClaims({
       });
       evidenceWritten = true;
 
-      // จังหวะที่ 3: อนุมัติ (transaction เดิมที่กันส่งของชิ้นเดียวให้ 2 คน)
-      const nowIso = new Date().toISOString();
-      // ใช้ transaction + precondition กัน "ส่งของชิ้นเดียวให้ 2 คน" (สองแท็บ/สองเจ้าหน้าที่กดพร้อมกัน)
-      // อนุมัติได้เฉพาะคำขอที่กำลังจองโพสต์นี้อยู่จริง (reservationClaimId ตรงกับคำขอนี้) — กันอนุมัติคำขอซ้ำซ้อน
-      const postId = claim.postId;
-      if (postId) {
+          // จังหวะที่ 3: อนุมัติ (transaction เดิมที่กันส่งของชิ้นเดียวให้ 2 คน)
+          const nowIso = new Date().toISOString();
+          const matchedPostId = claim.matchedPostId || null;
+          // โพสต์ของหายที่ผู้ขอเลือกตอนขอรับของ — ต้องปิดด้วยตอนคืนของสำเร็จ
+          // (ไม่มีโพสต์หายที่เลือก = ไม่ต้องแตะ ปิดใน transaction เดียวกันไม่ได้เพราะกฎอ่าน claim ก่อนเขียน)
+          let matchedPostWarning: string | null = null;
+          // ใช้ transaction + precondition กัน "ส่งของชิ้นเดียวให้ 2 คน" (สองแท็บ/สองเจ้าหน้าที่กดพร้อมกัน)
+          // อนุมัติได้เฉพาะคำขอที่กำลังจองโพสต์นี้อยู่จริง (reservationClaimId ตรงกับคำขอนี้) — กันอนุมัติคำขอซ้ำซ้อน
+          const postId = claim.postId;
+          if (postId) {
             await runTransaction(db, async (tx) => {
               const postRef = doc(db, "posts", postId);
               const postSnap = await tx.get(postRef);
@@ -1700,12 +2491,33 @@ function AdminClaims({
                 reviewedByUid: adminUid || "",
               });
             });
+
+            // จังหวะที่ 4: ปิดโพสต์ของหายที่ผู้ขอเลือก (แยกจาก transaction เพราะกฎ canCloseMatchedLostPost
+            // ต้องเห็นสถานะคำขอเป็น 'approved' แล้ว — ทำใน transaction เดียวกันกฎจะยังเห็นเป็น 'pending')
+            if (matchedPostId) {
+              try {
+                await closeMatchedLostPostDoc(matchedPostId, claim.id);
+              } catch (e) {
+                console.error("Error closing matched lost post:", e);
+                matchedPostWarning =
+                  "อนุมัติคำขอแล้ว แต่ปิดโพสต์ของหายที่ผู้ขอเลือกไม่สำเร็จ (กฎ Firestore อาจยังไม่ได้ deploy) — เปิดรายการในหน้าประวัติแล้วกด 'ปิดโพสต์ของหาย' เพื่อซ่อม";
+              }
+            }
           } else {
             await updateDoc(doc(db, "claims", claim.id), {
               status: "approved",
               reviewedAt: nowIso,
               reviewedByUid: adminUid || "",
             });
+            if (matchedPostId) {
+              try {
+                await closeMatchedLostPostDoc(matchedPostId, claim.id);
+              } catch (e) {
+                console.error("Error closing matched lost post:", e);
+                matchedPostWarning =
+                  "อนุมัติคำขอแล้ว แต่ปิดโพสต์ของหายที่ผู้ขอเลือกไม่สำเร็จ (กฎ Firestore อาจยังไม่ได้ deploy) — เปิดรายการในหน้าประวัติแล้วกด 'ปิดโพสต์ของหาย' เพื่อซ่อม";
+              }
+            }
           }
           if (claim.postId) {
             try {
@@ -1760,6 +2572,10 @@ function AdminClaims({
           setSelectedClaim(null);
           setClaimPost(null);
           setClaimPostZoom(null);
+          // อนุมัติสำเร็จ แต่ปิดโพสต์ของหายไม่สำเร็จ → เตือนให้เจ้าหน้าที่ไปตรวจสอบ (ไม่ย้อนกลับการอนุมัติ)
+          if (matchedPostWarning) {
+            showToast(matchedPostWarning, "error");
+          }
         } catch (e) {
           console.error("[confirmHandover] error:", e);
           const msg = (e as { message?: string; code?: string })?.message || "";
@@ -1946,7 +2762,15 @@ function AdminClaims({
                     </span>
                   </div>
                   <div style={{ fontSize: "11px", color: "var(--fg-secondary)", lineHeight: 1.5 }}>
-                    ผู้ขอ: <strong>{claim.claimantName}</strong> · {formatTime(claim.createdAt)}
+                    ผู้ขอ:{" "}
+                    <span style={{ fontWeight: 700 }}>
+                      <UserLink
+                        value={claim.claimantName}
+                        fallback="ไม่ระบุชื่อ"
+                        onClick={claim.claimantId ? () => setQuickUserId(claim.claimantId as string) : undefined}
+                      />
+                    </span>{" "}
+                    · {formatTime(claim.createdAt)}
                   </div>
                   {claim.status === "pending" && claim.expiresAt && (
                     <div style={{ fontSize: "11px", color: claim.pickupDate ? "var(--sc-warn-fg-strong)" : "var(--sc-info-fg)", marginTop: "2px" }}>
@@ -1965,9 +2789,14 @@ function AdminClaims({
                       โทร: {claim.phone || claim.contact}
                     </div>
                   )}
-                  {claim.email && (
+                  {(claim.email || claim.claimantId) && (
                     <div style={{ fontSize: "11px", color: "var(--fg-secondary)", marginTop: "2px" }}>
-                      อีเมล: {claim.email}
+                      อีเมล:{" "}
+                      <UserLink
+                        value={claim.email}
+                        fallback="กดเพื่อดูอีเมลจากบัญชี"
+                        onClick={claim.claimantId ? () => setQuickUserId(claim.claimantId as string) : undefined}
+                      />
                     </div>
                   )}
                 </div>
@@ -2157,6 +2986,26 @@ function AdminClaims({
             <Eye size={18} /> ดูรายละเอียดโพสต์ฉบับเต็ม
           </SheetButton>
 
+          <div style={{
+            display: "flex", alignItems: "center", gap: "10px", flexWrap: "wrap",
+            padding: "11px 13px", borderRadius: "12px",
+            border: "1px solid var(--border)", backgroundColor: "var(--bg-hover)",
+          }}>
+            <span style={{
+              fontSize: "12px", fontWeight: 700, color: "var(--sc-info-fg)",
+              display: "flex", alignItems: "center", gap: "6px", flexShrink: 0,
+            }}>
+              <User size={14} /> ผู้ขอรับของ
+            </span>
+            <UserIdentity
+              uid={selectedClaim.claimantId}
+              name={selectedClaim.claimantName}
+              email={selectedClaim.email}
+              onOpen={(uid) => setQuickUserId(uid)}
+              size="sm"
+            />
+          </div>
+
           <InfoGrid>
             <InfoRow
               icon={User}
@@ -2338,19 +3187,26 @@ function AdminClaims({
             </div>
           )}
 
-          <InfoGrid>
-            <InfoRow icon={MapPin} label="สถานที่" value={claimPost.locationName || "-"} />
-            <InfoRow icon={User} label="ผู้แจ้ง" value={claimPost.reporterName || "-"} />
-            <InfoRow
-              icon={Clock}
-              label="วันที่ / เวลาโพสต์"
-              value={[
-                formatDateShort(claimPost.date),
-                formatClockTime(claimPost.createdAt),
-              ].filter(Boolean).join(" ") || "-"}
+          <div style={{
+            display: "flex", alignItems: "center", gap: "10px", flexWrap: "wrap",
+            padding: "11px 13px", borderRadius: "12px",
+            border: "1px solid var(--border)", backgroundColor: "var(--bg-hover)",
+          }}>
+            <span style={{
+              fontSize: "12px", fontWeight: 700, color: "var(--fg-accent)",
+              display: "flex", alignItems: "center", gap: "6px", flexShrink: 0,
+            }}>
+              <User size={14} /> ผู้แจ้งโพสต์
+            </span>
+            <UserIdentity
+              uid={claimPost.userId || claimPost.uid}
+              name={claimPost.reporterName || claimPost.reporter}
+              onOpen={(uid) => setQuickUserId(uid)}
+              size="sm"
             />
-            <InfoRow icon={MapPin} label="สถานะ" value={claimPost.status || "-"} />
-          </InfoGrid>
+          </div>
+
+          <PostFactsGrid post={claimPost} />
         </ReviewSheet>
       )}
 
@@ -2377,6 +3233,15 @@ function AdminClaims({
           }}
         />
       )}
+
+      {/* ทางลัดดู/จัดการผู้ใช้ — เปิดจากชื่อหรืออีเมลของผู้ขอรับของ/ผู้แจ้งโพสต์ */}
+      <AdminUserSheet
+        userId={quickUserId}
+        onClose={() => setQuickUserId(null)}
+        zIndex={320}
+        canManage={isSuper}
+        onManageUsers={onManageUsers}
+      />
     </div>
   );
 }
@@ -2384,19 +3249,39 @@ function AdminClaims({
 function AdminHistory({
   isStaff,
   adminPoint,
+  isSuper,
+  onManageUsers,
 }: {
   isStaff?: boolean;
   adminPoint?: string | null;
+  isSuper?: boolean;
+  onManageUsers?: (uid: string) => void;
 }) {
   const [history, setHistory] = useState<AdminClaim[]>([]);
   const [searchText, setSearchText] = useState("");
   const [selected, setSelected] = useState<AdminClaim | null>(null);
   const [selectedZoom, setSelectedZoom] = useState<string | null>(null);
+  // ทางลัดดู/จัดการผู้ใช้ — กดที่ชื่อหรืออีเมลของผู้ขอรับของในประวัติได้เลย
+  const [quickUserId, setQuickUserId] = useState<string | null>(null);
   // หลักฐานการส่งมอบของรายการที่เปิดดูอยู่ (โหลดเฉพาะรายการที่อนุมัติแล้ว)
   const [selectedHandoverState, setSelectedHandover] = useState<{
     claimId: string;
     data: HandoverEvidence | null;
   } | null>(null);
+  // โพสต์ที่เกี่ยวข้องของรายการที่อนุมัติแล้ว: โพสต์ของพบ + โพสต์ของหายที่ผู้ขอเลือก (ไม่มีก็ไม่ดึง)
+  const [selectedPostsState, setSelectedPosts] = useState<{
+    claimId: string;
+    found: PostItem | null;
+    lost: PostItem | null;
+  } | null>(null);
+  // ดูรายละเอียดโพสต์แบบเต็ม (เปิดจากประวัติ)
+  const [postDetail, setPostDetail] = useState<{ post: PostItem; label: string } | null>(null);
+  const [postDetailZoom, setPostDetailZoom] = useState<string | null>(null);
+  // ลบรายการประวัติ
+  const [deleteTarget, setDeleteTarget] = useState<AdminClaim | null>(null);
+  const [deleting, setDeleting] = useState(false);
+  // กำลังปิดโพสต์ของหายที่ผู้ขอเลือก (ซ่อมเคสย้อนหลังในหน้าประวัติ)
+  const [closingPostId, setClosingPostId] = useState<string | null>(null);
 
   useEffect(() => {
     // เจ้าหน้าที่ยังไม่มีจุด: ห้าม query ทั้งหมด (rules บังคับกรองจุด → deny เงียบ)
@@ -2431,6 +3316,68 @@ function AdminHistory({
   }, [selectedHistoryId, selectedHistoryApproved]);
   const selectedHandover =
     selectedHandoverState?.claimId === selectedHistoryId ? selectedHandoverState.data : null;
+
+  // รายการที่ "คืนของแล้ว" → ดึงโพสต์พบ + โพสต์หายที่ผู้ขอเลือกมาแสดงคู่กัน
+  // (ถ้าไม่มี matchedPostId จะไม่ดึงโพสต์หาย — รายการปฏิเสธแสดงตามปกติ ไม่ต้องดึง)
+  const loadSelectedPosts = async (claimId: string, postId?: string | null, matchedPostId?: string | null) => {
+    const found = await loadPostDoc(postId);
+    const lost = await loadPostDoc(matchedPostId);
+    setSelectedPosts({ claimId, found, lost });
+  };
+  useEffect(() => {
+    if (!selectedHistoryId || !selectedHistoryApproved) return;
+    let cancelled = false;
+    (async () => {
+      const found = await loadPostDoc(selected?.postId);
+      const lost = await loadPostDoc(selected?.matchedPostId);
+      if (!cancelled) setSelectedPosts({ claimId: selectedHistoryId, found, lost });
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [selectedHistoryId, selectedHistoryApproved, selected?.postId, selected?.matchedPostId]);
+
+  const selectedPosts =
+    selectedPostsState?.claimId === selectedHistoryId ? selectedPostsState : null;
+
+  // ซ่อมเคสที่อนุมัติไปแล้วแต่โพสต์ของหายยังไม่ถูกปิด (เช่น ตอนกฎ Firestore ยังไม่ได้ deploy)
+  const handleCloseMatchedPost = async (claim: AdminClaim, lostPostId: string) => {
+    setClosingPostId(lostPostId);
+    try {
+      await closeMatchedLostPostDoc(lostPostId, claim.id);
+      await loadSelectedPosts(claim.id, claim.postId, claim.matchedPostId);
+      showToast("ปิดโพสต์ของหายที่ผู้ขอเลือกแล้ว (หายจากหน้า Home)", "success");
+    } catch (e) {
+      console.error("Error closing matched lost post:", e);
+      showToast("ปิดไม่สำเร็จ — ถ้ายังไม่ได้ deploy กฎ Firestore ใหม่ ระบบจะปฏิเสธการแก้โพสต์หาย", "error");
+    } finally {
+      setClosingPostId(null);
+    }
+  };
+
+  // เปิดดูรายละเอียดโพสต์เต็มจากการ์ดประวัติ (ดึงสดเสมอ ไม่ต้องรอเปิดการ์ดรายละเอียดก่อน)
+  const openPostDetail = async (postId: string | null | undefined, label: string) => {
+    if (!postId) return;
+    const post = await loadPostDoc(postId);
+    if (post) setPostDetail({ post, label });
+    else showToast("ไม่สามารถเปิดรายละเอียดโพสต์ได้", "error");
+  };
+
+  // ลบรายการประวัติ (เฉพาะรายการที่ปิดเคสแล้ว — กฎ Firestore บังคับให้คำขอที่ยัง pending ลบไม่ได้)
+  const handleDeleteHistory = async (claim: AdminClaim) => {
+    setDeleting(true);
+    try {
+      await deleteDoc(doc(db, "claims", claim.id));
+      showToast("ลบรายการประวัติแล้ว", "success");
+      setDeleteTarget(null);
+      if (selected?.id === claim.id) setSelected(null);
+    } catch (e) {
+      console.error("Error deleting history record:", e);
+      showToast("ลบไม่สำเร็จ (ไม่มีสิทธิ์ลบรายการนี้)", "error");
+    } finally {
+      setDeleting(false);
+    }
+  };
 
   const filtered = history.filter((c) => {
     if (c.status === "pending") return false;
@@ -2542,6 +3489,30 @@ function AdminHistory({
                 }}>
                   <Eye size={14} /> ดูรายละเอียด
                 </button>
+                {claim.postId && (
+                  <button
+                    onClick={() => openPostDetail(claim.postId, "โพสต์ของพบ")}
+                    title="ดูรายละเอียดโพสต์ของพบ"
+                    style={{
+                      padding: "9px 12px", borderRadius: "8px", border: "1px solid var(--border)",
+                      backgroundColor: "var(--bg-card)", color: "var(--fg-strong)", fontSize: "12px", fontWeight: 700,
+                      cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", gap: "5px",
+                    }}
+                  >
+                    <FileText size={14} /> โพสต์
+                  </button>
+                )}
+                <button
+                  onClick={() => setDeleteTarget(claim)}
+                  title="ลบรายการประวัตินี้"
+                  style={{
+                    padding: "9px 12px", borderRadius: "8px", border: "1px solid var(--sc-danger-border)",
+                    backgroundColor: "var(--sc-danger-bg)", color: "var(--sc-danger-fg)", fontSize: "12px", fontWeight: 700,
+                    cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", gap: "5px",
+                  }}
+                >
+                  <Trash2 size={14} /> ลบ
+                </button>
               </div>
             </div>
           );
@@ -2555,11 +3526,36 @@ function AdminHistory({
         title="รายละเอียดประวัติ"
         subtitle={selected?.postTitle}
         badge={selected ? getStatusBadge(selected) : undefined}
-        maxWidth={720}
+        maxWidth={860}
         footer={
-          <SheetButton onClick={() => setSelected(null)} full>
-            ปิด
-          </SheetButton>
+          <>
+            {selected && (
+              <>
+                {selected.postId && (
+                  <SheetButton
+                    tone="neutral"
+                    icon={FileText}
+                    onClick={() => openPostDetail(selected.postId, "โพสต์ของพบ")}
+                  >
+                    ดูโพสต์ของพบ
+                  </SheetButton>
+                )}
+                {selected.matchedPostId && (
+                  <SheetButton
+                    tone="neutral"
+                    icon={FileText}
+                    onClick={() => openPostDetail(selected.matchedPostId, "โพสต์ของหาย")}
+                  >
+                    ดูโพสต์ของหาย
+                  </SheetButton>
+                )}
+                <SheetButton tone="danger" icon={Trash2} onClick={() => setDeleteTarget(selected)}>
+                  ลบประวัติ
+                </SheetButton>
+              </>
+            )}
+            <SheetButton onClick={() => setSelected(null)}>ปิด</SheetButton>
+          </>
         }
       >
         {selected && (
@@ -2616,6 +3612,96 @@ function AdminHistory({
               </div>
             )}
 
+            {/* รายการที่ "คืนของแล้ว" → โพสต์พบ + โพสต์หายที่ผู้ขอเลือก แสดงคู่กัน
+                (ถ้าคำขอไม่ได้เลือกโพสต์ของหาย จะไม่ดึงและไม่แสดงฝั่งนั้น)
+                รายการที่ปฏิเสธ → แสดงตามปกติ ไม่ดึงโพสต์มาแสดงคู่ */}
+            {selected.status === "approved" && (
+              <div style={{ display: "flex", flexDirection: "column", gap: "10px" }}>
+                <div style={{
+                  fontSize: "12px", fontWeight: 700, color: "var(--fg-accent)",
+                  display: "flex", alignItems: "center", gap: "6px",
+                }}>
+                  <PackageCheck size={14} />
+                  คืนของแล้ว — ดูโพสต์ทั้งสองฝั่ง
+                  {selected.matchedPostId && (
+                    <span style={{ color: "var(--fg-faint)", fontWeight: 600 }}>(โพสต์พบ + โพสต์หายที่ผู้ขอเลือก)</span>
+                  )}
+                </div>
+                <div style={{
+                  display: "grid",
+                  gridTemplateColumns: "repeat(auto-fit, minmax(240px, 1fr))",
+                  gap: "12px",
+                }}>
+                  {selectedPosts?.found ? (
+                    <PairedPostCard
+                      post={selectedPosts.found}
+                      label="โพสต์ของพบ"
+                      onOpen={() => openPostDetail(selected.postId, "โพสต์ของพบ")}
+                    />
+                  ) : (
+                    <div style={{
+                      padding: "14px", borderRadius: "12px", border: "1px dashed var(--border-strong)",
+                      fontSize: "12px", color: "var(--fg-muted)", display: "flex", alignItems: "center", gap: "8px",
+                    }}>
+                      <Loader2 size={14} style={{ animation: "spin 1s linear infinite" }} />
+                      {selected.postId ? "กำลังโหลดโพสต์ของพบ..." : "ไม่พบโพสต์ของพบ (ถูกลบไปแล้ว)"}
+                    </div>
+                  )}
+                  {selected.matchedPostId && (
+                    selectedPosts?.lost ? (
+                      <>
+                        <PairedPostCard
+                          post={selectedPosts.lost}
+                          label="โพสต์ของหายที่ผู้ขอเลือก"
+                          onOpen={() => openPostDetail(selected.matchedPostId, "โพสต์ของหาย")}
+                        />
+                        {/* เคสที่อนุมัติไปแล้วแต่โพสต์หายยังไม่ถูกปิด (ของอนุมัติก่อนมีระบบนี้ หรือตอนกฎยังไม่ deploy) */}
+                        {selectedPosts.lost.status !== "returned_matched" && (
+                          <div style={{
+                            gridColumn: "1 / -1",
+                            padding: "12px 14px", borderRadius: "12px",
+                            backgroundColor: "var(--sc-warn-bg)", border: "1px solid var(--sc-warn-border)",
+                            fontSize: "12.5px", color: "var(--sc-warn-fg)", lineHeight: 1.65,
+                            display: "flex", alignItems: "center", gap: "10px", flexWrap: "wrap",
+                          }}>
+                            <AlertTriangle size={16} style={{ flexShrink: 0 }} />
+                            <span style={{ flex: 1, minWidth: "200px" }}>
+                              คืนของแล้วแต่โพสต์ของหายฝั่งนี้ยังไม่ถูกปิด — ตอนนี้ยังขึ้นอยู่ในหน้า Home
+                            </span>
+                            <button
+                              onClick={() => handleCloseMatchedPost(selected, selected.matchedPostId as string)}
+                              disabled={closingPostId === selected.matchedPostId}
+                              style={{
+                                padding: "8px 12px", borderRadius: "8px", border: "1px solid var(--sc-warn-border)",
+                                backgroundColor: "var(--sc-ok-bg)", color: "var(--sc-ok-fg)", fontSize: "12px",
+                                fontWeight: 700, cursor: closingPostId === selected.matchedPostId ? "wait" : "pointer",
+                                display: "flex", alignItems: "center", gap: "6px", opacity: closingPostId === selected.matchedPostId ? 0.6 : 1,
+                              }}
+                            >
+                              {closingPostId === selected.matchedPostId ? (
+                                <><Loader2 size={14} style={{ animation: "spin 1s linear infinite" }} /> กำลังปิด...</>
+                              ) : (
+                                <><PackageCheck size={14} /> ปิดโพสต์ของหาย</>
+                              )}
+                            </button>
+                          </div>
+                        )}
+                      </>
+                    ) : (
+                      <div style={{
+                        padding: "14px", borderRadius: "12px", border: "1px dashed var(--border-strong)",
+                        fontSize: "12px", color: "var(--fg-muted)", display: "flex", alignItems: "center", gap: "8px",
+                      }}>
+                        {selectedPosts
+                          ? "ไม่พบโพสต์ของหาย (ถูกลบไปแล้ว)"
+                          : <><Loader2 size={14} style={{ animation: "spin 1s linear infinite" }} /> กำลังโหลดโพสต์ของหาย...</>}
+                      </div>
+                    )
+                  )}
+                </div>
+              </div>
+            )}
+
             <div style={{
               fontSize: "21px",
               fontWeight: 800,
@@ -2624,6 +3710,26 @@ function AdminHistory({
               wordBreak: "break-word",
             }}>
               {selected.postTitle}
+            </div>
+
+            <div style={{
+              display: "flex", alignItems: "center", gap: "10px", flexWrap: "wrap",
+              padding: "11px 13px", borderRadius: "12px",
+              border: "1px solid var(--border)", backgroundColor: "var(--bg-hover)",
+            }}>
+              <span style={{
+                fontSize: "12px", fontWeight: 700, color: "var(--sc-info-fg)",
+                display: "flex", alignItems: "center", gap: "6px", flexShrink: 0,
+              }}>
+                <User size={14} /> ผู้ขอรับของ
+              </span>
+              <UserIdentity
+                uid={selected.claimantId}
+                name={selected.claimantName}
+                email={selected.email}
+                onOpen={(uid) => setQuickUserId(uid)}
+                size="sm"
+              />
             </div>
 
             <InfoGrid>
@@ -2714,6 +3820,123 @@ function AdminHistory({
         )}
       </ReviewSheet>
       <ImageLightbox src={selectedZoom} onClose={() => setSelectedZoom(null)} />
+
+      {/* รายละเอียดโพสต์แบบเต็ม (เปิดจากประวัติ — ทั้งโพสต์พบและโพสต์หาย) */}
+      {postDetail && (
+        <ReviewSheet
+          open
+          onClose={() => { setPostDetail(null); setPostDetailZoom(null); }}
+          title={postDetail.label}
+          subtitle={postDetail.post.title}
+          zIndex={340}
+          maxWidth={720}
+          footer={
+            <SheetButton
+              tone="neutral"
+              onClick={() => { setPostDetail(null); setPostDetailZoom(null); }}
+            >
+              <X size={18} /> ปิด
+            </SheetButton>
+          }
+        >
+          <div style={{ display: "flex", gap: "6px", flexWrap: "wrap", alignItems: "center" }}>
+            <span style={{
+              fontSize: "11px", fontWeight: 700, padding: "3px 9px", borderRadius: "7px",
+              backgroundColor: postDetail.post.itemType === "lost" ? "var(--sc-warn-bg)" : "var(--sc-ok-bg)",
+              color: postDetail.post.itemType === "lost" ? "var(--sc-warn-fg)" : "var(--sc-ok-fg)",
+            }}>
+              {postDetail.post.itemType === "lost" ? "โพสต์ของหาย" : "โพสต์ของพบ"}
+            </span>
+            <span style={{
+              fontSize: "11px", fontWeight: 700, padding: "3px 9px", borderRadius: "7px",
+              backgroundColor: postStatusMeta(postDetail.post.status).bg,
+              color: postStatusMeta(postDetail.post.status).fg,
+            }}>
+              {postStatusMeta(postDetail.post.status).label}
+            </span>
+            <span style={{ fontSize: "11px", color: "var(--fg-faint)", fontFamily: "'SF Mono', monospace" }}>
+              ID: {postDetail.post.id}
+            </span>
+          </div>
+
+          <ReviewImage
+            src={postDetail.post.imageUrl}
+            images={getPostImages(postDetail.post)}
+            alt={postDetail.post.title}
+            onZoom={(src) => setPostDetailZoom(src)}
+          />
+
+          {postDetail.post.desc && (
+            <div style={{
+              padding: "14px 16px", backgroundColor: "var(--bg-subtle)", borderRadius: "12px",
+              border: "1px solid var(--border)",
+            }}>
+              <div style={{
+                fontSize: "12px", fontWeight: 700, color: "var(--fg-accent)",
+                marginBottom: "6px", display: "flex", alignItems: "center", gap: "6px",
+              }}>
+                <FileText size={14} /> รายละเอียด
+              </div>
+              <div style={{
+                fontSize: "14.5px", color: "var(--fg-secondary)", lineHeight: 1.75,
+                whiteSpace: "pre-wrap", wordBreak: "break-word",
+              }}>
+                {postDetail.post.desc}
+              </div>
+            </div>
+          )}
+
+          <div style={{
+            display: "flex", alignItems: "center", gap: "10px", flexWrap: "wrap",
+            padding: "11px 13px", borderRadius: "12px",
+            border: "1px solid var(--border)", backgroundColor: "var(--bg-hover)",
+          }}>
+            <span style={{
+              fontSize: "12px", fontWeight: 700, color: "var(--fg-accent)",
+              display: "flex", alignItems: "center", gap: "6px", flexShrink: 0,
+            }}>
+              <User size={14} /> ผู้แจ้ง / เจ้าของโพสต์
+            </span>
+            <UserIdentity
+              uid={postDetail.post.userId || postDetail.post.uid}
+              name={postDetail.post.reporterName || postDetail.post.reporter}
+              onOpen={(uid) => setQuickUserId(uid)}
+              size="sm"
+            />
+          </div>
+
+          <PostFactsGrid post={postDetail.post} />
+        </ReviewSheet>
+      )}
+
+      <ImageLightbox
+        src={postDetailZoom}
+        images={postDetail ? getPostImages(postDetail.post) : null}
+        onClose={() => setPostDetailZoom(null)}
+      />
+
+      {/* ยืนยันลบรายการประวัติ */}
+      {deleteTarget && (
+        <ConfirmModal
+          open
+          title="ยืนยันลบรายการประวัติ"
+          message={`ลบประวัติคำขอของ "${deleteTarget.claimantName || deleteTarget.postTitle || "ไม่ระบุชื่อ"}"? รายการนี้จะหายจากประวัติถาวร (โพสต์และหลักฐานที่เกี่ยวข้องยังอยู่)`}
+          confirmText="ลบรายการ"
+          variant="danger"
+          busy={deleting}
+          onConfirm={() => handleDeleteHistory(deleteTarget)}
+          onCancel={() => !deleting && setDeleteTarget(null)}
+        />
+      )}
+
+      {/* ทางลัดดู/จัดการผู้ใช้ — เปิดจากชื่อหรืออีเมลในประวัติ */}
+      <AdminUserSheet
+        userId={quickUserId}
+        onClose={() => setQuickUserId(null)}
+        zIndex={320}
+        canManage={isSuper}
+        onManageUsers={onManageUsers}
+      />
     </div>
   );
 }
@@ -2721,7 +3944,15 @@ function AdminHistory({
 /* ================================================
    SECTION 3: MANAGE POSTS
    ================================================ */
-function AdminPosts({ posts }: { posts: PostItem[] }) {
+function AdminPosts({
+  posts,
+  isSuper,
+  onManageUsers,
+}: {
+  posts: PostItem[];
+  isSuper?: boolean;
+  onManageUsers?: (uid: string) => void;
+}) {
   const [searchText, setSearchText] = useState("");
   const [filterType, setFilterType] = useState<"all" | "lost" | "found" | "resolved">("all");
   const [filterBuilding, setFilterBuilding] = useState("all");
@@ -2735,6 +3966,8 @@ function AdminPosts({ posts }: { posts: PostItem[] }) {
     variant?: "danger" | "primary";
     onConfirm: () => void;
   } | null>(null);
+  // ทางลัดดู/จัดการผู้ใช้ — กดที่ชื่อหรืออีเมลของเจ้าของโพสต์ได้เลย
+  const [quickUserId, setQuickUserId] = useState<string | null>(null);
 
   const uniqueBuildings = Array.from(new Set(
     posts.map((p) => p.locationName || p.building).filter(Boolean)
@@ -2945,7 +4178,12 @@ function AdminPosts({ posts }: { posts: PostItem[] }) {
                       {sl.text}
                     </span>
                     <span style={{ fontSize: "10px", color: "var(--fg-faint)" }}>
-                      {post.reporterName || "-"} · {post.locationName || "-"}
+                      <UserLink
+                        value={post.reporterName}
+                        fallback="ไม่ระบุชื่อ"
+                        onClick={post.userId || post.uid ? () => setQuickUserId((post.userId || post.uid) as string) : undefined}
+                      />{" "}
+                      · {post.locationName || "-"}
                     </span>
                     {post.itemType === "found" && post.depositLocation && (
                       <span style={{
@@ -3051,21 +4289,26 @@ function AdminPosts({ posts }: { posts: PostItem[] }) {
               </div>
             )}
 
-            <InfoGrid>
-              <InfoRow icon={MapPin} label="สถานที่" value={selectedPost.locationName || "-"} />
-              {selectedPost.itemType === "found" && (
-                <InfoRow
-                  icon={ShieldAlert}
-                  label="จุดฝาก/คืน"
-                  value={selectedPost.depositLocation || "ไม่ระบุ"}
-                  color="var(--sc-ok-fg)"
-                  bg="var(--sc-ok-bg)"
-                />
-              )}
-              <InfoRow icon={User} label="ผู้แจ้ง" value={selectedPost.reporterName || "-"} />
-              <InfoRow icon={Clock} label="วันที่" value={formatDateShort(selectedPost.date) || "-"} />
-              <InfoRow icon={Clock} label="เวลาโพสต์" value={formatClockTime(selectedPost.createdAt) || "-"} />
-            </InfoGrid>
+            <div style={{
+              display: "flex", alignItems: "center", gap: "10px", flexWrap: "wrap",
+              padding: "11px 13px", borderRadius: "12px",
+              border: "1px solid var(--border)", backgroundColor: "var(--bg-hover)",
+            }}>
+              <span style={{
+                fontSize: "12px", fontWeight: 700, color: "var(--fg-accent)",
+                display: "flex", alignItems: "center", gap: "6px", flexShrink: 0,
+              }}>
+                <User size={14} /> ผู้แจ้ง / เจ้าของโพสต์
+              </span>
+              <UserIdentity
+                uid={selectedPost.userId || selectedPost.uid}
+                name={selectedPost.reporterName || selectedPost.reporter}
+                onOpen={(uid) => setQuickUserId(uid)}
+                size="sm"
+              />
+            </div>
+
+            <PostFactsGrid post={selectedPost} />
           </>
         )}
       </ReviewSheet>
@@ -3091,6 +4334,15 @@ function AdminPosts({ posts }: { posts: PostItem[] }) {
           onCancel={() => setConfirmDialog(null)}
         />
       )}
+
+      {/* ทางลัดดู/จัดการผู้ใช้ — เปิดจากชื่อหรืออีเมลของเจ้าของโพสต์ */}
+      <AdminUserSheet
+        userId={quickUserId}
+        onClose={() => setQuickUserId(null)}
+        zIndex={320}
+        canManage={isSuper}
+        onManageUsers={onManageUsers}
+      />
     </div>
   );
 }
@@ -3904,7 +5156,13 @@ function AdminReports() {
 /* ================================================
    SECTION 4: MANAGE USERS
    ================================================ */
-function AdminUsers({ users }: { users: AdminUser[] }) {
+function AdminUsers({
+  users,
+  focusUser,
+}: {
+  users: AdminUser[];
+  focusUser?: AdminUser | null;
+}) {
   const [searchText, setSearchText] = useState("");
   const [selectedUser, setSelectedUser] = useState<AdminUser | null>(null);
   const [confirmDialog, setConfirmDialog] = useState<{
@@ -3916,6 +5174,14 @@ function AdminUsers({ users }: { users: AdminUser[] }) {
   } | null>(null);
   const [userPosts, setUserPosts] = useState<PostItem[]>([]);
   const [userClaims, setUserClaims] = useState<AdminClaim[]>([]);
+
+  // ทางลัด: มาจากการ์ดผู้ใช้ในแท็บอื่น → เปิดการ์ดของคนนั้นทันที (ข้อมูลผู้ใช้โหลดไว้ที่ฝั่งหน้าหลักแล้ว)
+  const [displayFocusKey, setDisplayFocusKey] = useState<string | null>(null);
+  const focusKey = focusUser ? `${focusUser.id}|${focusUser.name ?? ""}|${focusUser.banned ? 1 : 0}` : null;
+  if (displayFocusKey !== focusKey) {
+    setDisplayFocusKey(focusKey);
+    if (focusUser) setSelectedUser(focusUser);
+  }
 
   // ล้างข้อมูลเก่าทันทีเมื่อเปลี่ยนคน (ปรับ state ระหว่าง render ตามแนวทาง React)
   const [displayUid, setDisplayUid] = useState<string | null>(null);
