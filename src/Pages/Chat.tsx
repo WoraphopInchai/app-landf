@@ -803,7 +803,7 @@ export default function Chat({ currentUser, onOpenProfile, initialChat }: ChatPr
                 borderRadius: "50%",
                 background: avatarGradient(otherName),
                 color: "#fff",
-                fontSize: 10,
+                fontSize: 12,
                 fontWeight: 800,
                 display: "flex",
                 alignItems: "center",
@@ -813,7 +813,7 @@ export default function Chat({ currentUser, onOpenProfile, initialChat }: ChatPr
             >
               {avatarInitial(otherName)}
             </div>
-            <div style={{ fontSize: 10, color: "#737373", fontWeight: 600 }}>
+            <div style={{ fontSize: 12, color: "#737373", fontWeight: 600 }}>
               {otherName}
             </div>
           </div>
@@ -938,7 +938,7 @@ export default function Chat({ currentUser, onOpenProfile, initialChat }: ChatPr
             <div style={{ fontSize: 15, fontWeight: 800, color: "var(--fg)", letterSpacing: "-0.01em" }}>
               {otherName}
             </div>
-            <div style={{ fontSize: 11, color: "var(--fg-muted)", marginTop: 2, fontWeight: 500 }}>
+            <div style={{ fontSize: 12, color: "var(--fg-muted)", marginTop: 2, fontWeight: 500 }}>
               {selectedChat.postTitle
                 ? `เกี่ยวกับ "${selectedChat.postTitle}"`
                 : "แชทในระบบ UP Lost & Found"}
@@ -989,7 +989,7 @@ export default function Chat({ currentUser, onOpenProfile, initialChat }: ChatPr
                 display: "flex",
                 alignItems: "center",
                 gap: 6,
-                fontSize: 10.5,
+                fontSize: 12,
                 color: "var(--fg-muted)",
                 fontWeight: 600,
                 background: "var(--bg-card)",
@@ -1066,7 +1066,7 @@ export default function Chat({ currentUser, onOpenProfile, initialChat }: ChatPr
                     >
                       <span
                         style={{
-                          fontSize: 10.5,
+                          fontSize: 12,
                           color: "var(--fg-muted)",
                           fontWeight: 700,
                           background: "var(--bg-card)",
@@ -1093,7 +1093,7 @@ export default function Chat({ currentUser, onOpenProfile, initialChat }: ChatPr
                           display: "flex",
                           alignItems: "center",
                           gap: 5,
-                          fontSize: 10.5,
+                          fontSize: 12,
                           color: "var(--fg-secondary)",
                           fontWeight: 700,
                           margin: "0 0 4px 4px",
@@ -1141,7 +1141,7 @@ export default function Chat({ currentUser, onOpenProfile, initialChat }: ChatPr
 
                     <div
                       style={{
-                        fontSize: 10,
+                        fontSize: 12,
                         color: isLastRead ? "var(--fg-accent)" : isMe ? "var(--sc-muted-fg)" : "var(--fg-faint)",
                         fontWeight: 600,
                         marginTop: 4,
@@ -1292,7 +1292,7 @@ export default function Chat({ currentUser, onOpenProfile, initialChat }: ChatPr
       >
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
           <div>
-            <div style={{ fontSize: 11, letterSpacing: "0.06em", color: "var(--fg-muted)", fontWeight: 700, textTransform: "uppercase" }}>
+            <div style={{ fontSize: 12, letterSpacing: "0.06em", color: "var(--fg-muted)", fontWeight: 700, textTransform: "uppercase" }}>
               University of Phayao
             </div>
             <div style={{ fontSize: 22, fontWeight: 800, marginTop: 3, letterSpacing: "-0.02em" }}>
@@ -1405,7 +1405,7 @@ export default function Chat({ currentUser, onOpenProfile, initialChat }: ChatPr
                 border: "1px solid var(--border)",
                 borderRadius: 4,
                 padding: "1px 5px",
-                fontSize: 11,
+                fontSize: 12,
                 color: "var(--fg-faint)",
                 cursor: "default",
                 pointerEvents: "none",
@@ -1546,7 +1546,7 @@ export default function Chat({ currentUser, onOpenProfile, initialChat }: ChatPr
                           {otherName}
                         </div>
                         {lastMessageTime && (
-                          <div style={{ fontSize: 10.5, color: unreadCount > 0 ? "var(--fg-accent)" : "var(--fg-faint)", fontWeight: unreadCount > 0 ? 800 : 600, flexShrink: 0 }}>
+                          <div style={{ fontSize: 12, color: unreadCount > 0 ? "var(--fg-accent)" : "var(--fg-faint)", fontWeight: unreadCount > 0 ? 800 : 600, flexShrink: 0 }}>
                             {formatListTime(lastMessageTime)}
                           </div>
                         )}
@@ -1562,7 +1562,7 @@ export default function Chat({ currentUser, onOpenProfile, initialChat }: ChatPr
                             flexShrink: 0,
                           }}
                         />
-                        <div style={{ fontSize: 11.5, color: "var(--fg-secondary)", fontWeight: 600, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
+                        <div style={{ fontSize: 12, color: "var(--fg-secondary)", fontWeight: 600, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
                           {chat.postTitle || "โพสต์"}
                         </div>
                       </div>
@@ -1589,7 +1589,7 @@ export default function Chat({ currentUser, onOpenProfile, initialChat }: ChatPr
                             style={{
                               background: "#7c5cfc",
                               color: "var(--accent-fg)",
-                              fontSize: 10.5,
+                              fontSize: 12,
                               fontWeight: 800,
                               minWidth: 21,
                               height: 21,

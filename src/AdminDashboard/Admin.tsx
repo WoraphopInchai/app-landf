@@ -36,6 +36,9 @@ import {
   PackageSearch,
   Plus,
   ChevronRight,
+  Phone,
+  Link2,
+  Camera,
 } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
 import {
@@ -62,7 +65,17 @@ import type { AppUser, PostItem, FirestoreTimeLike } from "../types";
 import { DEFAULT_RETURN_POINTS } from "../lib/returnPoints";
 import { useTheme } from "../theme";
 import { showToast } from "../lib/toast";
+import { getPostImages, getPostCover } from "../lib/postImages";
+import { uploadToCloudinary } from "../lib/uploadImage";
 import ConfirmModal from "../components/ConfirmModal";
+import ReviewSheet, {
+  InfoGrid,
+  InfoRow,
+  ImageLightbox,
+  ReviewImage,
+  SheetButton,
+} from "./ReviewSheet";
+import HandoverCaptureSheet from "./HandoverCaptureSheet";
 
 type AdminTab = "overview" | "found" | "claims" | "history" | "posts" | "reports" | "users" | "manage-admins";
 export type { AdminTab };
@@ -106,6 +119,9 @@ interface AdminClaim {
   contact?: string;
   note?: string;
   evidenceUrl?: string;
+  // โพสต์ของหายของผู้ขอ ที่ระบุว่าตรงกับโพสต์ของที่พบ (ผู้ใช้เลือกตอนกดขอรับของ)
+  matchedPostId?: string | null;
+  matchedPostTitle?: string | null;
   status?: string;
   createdAt?: FirestoreTimeLike;
   reviewedAt?: string;
@@ -113,6 +129,29 @@ interface AdminClaim {
   expiresAt?: string;
   pickupDate?: string;
   rejectReason?: string;
+}
+
+/* หลักฐานการส่งมอบ — เก็บเป็น subcollection คนละเอกสารกับ claim
+   (claims/{claimId}/handover/evidence) เพื่อให้กฎ Firestore คุมได้ว่า
+   "เฉพาะแอดมินอ่านได้" ผู้ขอจะอ่านรูปนี้ไม่ได้ */
+interface HandoverEvidence {
+  photoUrl: string;
+  depositLocation?: string;
+  capturedByUid?: string;
+  capturedAt?: string;
+}
+
+/* โหลดหลักฐานการส่งมอบของคำขอ — คืน null ถ้าไม่มี (เช่น คำขอที่ยัง pending หรือปฏิเสธ) */
+async function loadHandoverEvidence(claimId: string | null | undefined): Promise<HandoverEvidence | null> {
+  if (!claimId) return null;
+  try {
+    const snap = await getDoc(doc(db, "claims", claimId, "handover", "evidence"));
+    return snap.exists() ? (snap.data() as HandoverEvidence) : null;
+  } catch (e) {
+    // ไม่มีสิทธิ์อ่าน (เช่น staff ต่างจุด) → ถือว่าไม่มีหลักฐาน ไม่ทำให้หน้าจอพัง
+    console.error("Error loading handover evidence:", e);
+    return null;
+  }
 }
 
 interface AdminReport {
@@ -278,6 +317,17 @@ const REPORT_KIND_META: Record<
   post_report: { label: "รายงานโพสต์", color: "var(--sc-warn-fg)", bg: "var(--sc-warn-bg)" },
   claim_dispute: { label: "แจ้งสวมสิทธิ์", color: "var(--sc-danger-fg)", bg: "var(--sc-danger-bg)" },
   support_message: { label: "ติดต่อแอดมิน", color: "var(--sc-brand-fg)", bg: "var(--sc-brand-bg)" },
+};
+
+// ป้ายสถานะโพสต์ (ใช้ร่วมกันหลายแท็บ)
+const statusLabel = (p: PostItem) => {
+  if (p.status === "rejected") return { text: "ถูกปฏิเสธ", bg: "var(--sc-danger-bg)", color: "var(--sc-danger-fg)" };
+  if (p.status === "pending") return { text: "รอตรวจสอบ", bg: "var(--sc-warn-bg)", color: "var(--sc-warn-fg)" };
+  if (p.status === "suspended") return { text: "ระงับ", bg: "var(--sc-danger-bg)", color: "var(--sc-danger-fg)" };
+  if (p.status === "resolved") return { text: "คืนแล้ว", bg: "var(--sc-ok-bg)", color: "var(--sc-ok-fg)" };
+  if (p.status === "under_investigation") return { text: "อายัด", bg: "var(--sc-danger-bg)", color: "var(--sc-danger-fg)" };
+  if (p.status === "in_progress") return { text: "ดำเนินการ", bg: "var(--sc-info-bg)", color: "var(--sc-info-fg)" };
+  return { text: "ใช้งาน", bg: "var(--sc-ok-bg)", color: "var(--sc-ok-fg)" };
 };
 
 // แจ้งผลการจัดการกลับผู้รายงาน
@@ -568,17 +618,20 @@ export default function Admin({ currentUser, onLogout, initialTab, adminRole, ad
       backgroundColor: "var(--bg)", fontFamily: "'Inter', sans-serif",
     }}>
       {/* Top Header */}
-      <div style={{
-        background: "color-mix(in srgb, var(--bg) 78%, transparent)",
-        backdropFilter: "blur(14px)",
-        WebkitBackdropFilter: "blur(14px)",
-        padding: "10px 20px", display: "flex", alignItems: "center", gap: "12px",
-        borderBottom: "1px solid var(--border)",
-        flexShrink: 0,
-        height: 60,
-      }}>
+      <div
+        className="adm-topbar"
+        style={{
+          background: "color-mix(in srgb, var(--bg) 78%, transparent)",
+          backdropFilter: "blur(14px)",
+          WebkitBackdropFilter: "blur(14px)",
+          padding: "10px 20px", display: "flex", alignItems: "center", gap: "12px",
+          borderBottom: "1px solid var(--border)",
+          flexShrink: 0,
+          height: 60,
+        }}
+      >
         {/* Brand */}
-        <div style={{ display: "flex", alignItems: "center", gap: "10px", minWidth: 0 }}>
+        <div style={{ display: "flex", alignItems: "center", gap: "10px", minWidth: 0, flex: "1 1 auto" }}>
           <div style={{
             width: "36px", height: "36px", borderRadius: "10px", flexShrink: 0,
             background: "linear-gradient(135deg, #7c5cfc 0%, #4f3bd6 100%)",
@@ -591,16 +644,17 @@ export default function Admin({ currentUser, onLogout, initialTab, adminRole, ad
             <div style={{ fontSize: "14px", fontWeight: 800, color: "var(--fg)", lineHeight: 1.2, letterSpacing: "-0.01em", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
               UP Lost &amp; Found
             </div>
-            <div style={{ fontSize: "10.5px", color: "var(--fg-accent)", fontWeight: 700, letterSpacing: "0.08em", textTransform: "uppercase", marginTop: "1px" }}>
+            <div className="adm-hide-narrow" style={{ fontSize: "10.5px", color: "var(--fg-accent)", fontWeight: 700, letterSpacing: "0.08em", textTransform: "uppercase", marginTop: "1px" }}>
               Admin Panel
             </div>
           </div>
         </div>
 
         {/* Spacer */}
-        <div style={{ flex: 1 }} />
+        <div style={{ flex: "0 0 4px" }} />
 
-        {/* ชื่อจุดคืนของเจ้าหน้าที่ประจำจุด — เห็นทุกแท็บ กันเข้าใจผิดว่าอยู่จุดไหน */}
+        {/* ชื่อจุดคืนของเจ้าหน้าที่ประจำจุด — เห็นทุกแท็บ กันเข้าใจผิดว่าอยู่จุดไหน
+            (จอแคบซ่อนข้อความไว้ เหลือแค่ไอคอน ชื่อจุดยังดูได้จาก title) */}
         {isStaff && adminPoint && (
           <div
             title={`จุดที่คุณได้รับมอบหมาย: ${adminPoint}`}
@@ -618,7 +672,7 @@ export default function Admin({ currentUser, onLogout, initialTab, adminRole, ad
             }}
           >
             <MapPin size={15} />
-            <span style={{ fontSize: "12px", fontWeight: 700, whiteSpace: "nowrap" }}>
+            <span className="adm-hide-narrow" style={{ fontSize: "12px", fontWeight: 700, whiteSpace: "nowrap" }}>
               จุดคืน: {adminPoint}
             </span>
           </div>
@@ -626,11 +680,11 @@ export default function Admin({ currentUser, onLogout, initialTab, adminRole, ad
 
         {/* Theme toggle */}
         <button onClick={toggleTheme} title={theme === "dark" ? "สลับเป็นโหมดสว่าง" : "สลับเป็นโหมดมืด"} style={{
-          width: "36px", height: "36px", borderRadius: "10px", flexShrink: 0,
+          width: "40px", height: "40px", borderRadius: "10px", flexShrink: 0,
           border: "1px solid var(--border)", background: "var(--bg-card)",
           display: "flex", alignItems: "center", justifyContent: "center", cursor: "pointer",
           color: "var(--fg-secondary)",
-          transition: "border-color 0.13s ease",
+          transition: "background 0.13s ease",
         }}>
           {theme === "dark" ? <Sun size={16} /> : <Moon size={16} />}
         </button>
@@ -638,36 +692,39 @@ export default function Admin({ currentUser, onLogout, initialTab, adminRole, ad
         {/* Logout */}
         <button onClick={onLogout} title="ออกจากระบบ" style={{
           display: "flex", alignItems: "center", gap: "7px",
-          height: "36px", padding: "0 14px", borderRadius: "10px", flexShrink: 0,
+          height: "40px", padding: "0 14px", borderRadius: "10px", flexShrink: 0,
           border: "1px solid var(--sc-danger-border)", background: "var(--sc-danger-bg)",
           color: "var(--sc-danger-fg)", fontSize: "12.5px", fontWeight: 700, cursor: "pointer",
           boxShadow: "0 2px 8px rgba(0,0,0,0.25)",
-          transition: "all 0.15s ease",
+          transition: "filter 0.15s ease",
         }}>
           <LogOut size={15} />
-          ออกจากระบบ
+          <span className="adm-hide-narrow">ออกจากระบบ</span>
         </button>
       </div>
 
       {/* Tab Navigation */}
-      <div style={{
-        display: "flex", gap: "6px", padding: "12px 16px 8px",
-        backgroundColor: "var(--bg)", borderBottom: "1px solid var(--border)",
-        overflowX: "auto", flexShrink: 0,
-      }}>
+      <div
+        className="adm-tabs"
+        style={{
+          display: "flex", gap: "6px", padding: "12px 16px 8px",
+          backgroundColor: "var(--bg)", borderBottom: "1px solid var(--border)",
+          flexShrink: 0,
+        }}
+      >
         {allTabs.map((tab) => {
           const Icon = tab.icon;
           const isActive = activeTab === tab.id;
           return (
-            <button key={tab.id} onClick={() => setActiveTab(tab.id)} style={{
-              flex: "0 0 auto", padding: "8px 14px", borderRadius: "10px",
+            <button key={tab.id} onClick={() => setActiveTab(tab.id)} className="adm-tab" style={{
+              flex: "0 0 auto", borderRadius: "10px",
               border: isActive ? "none" : "1px solid var(--border)",
               backgroundColor: isActive ? "#7c5cfc" : "var(--bg-card)",
               color: isActive ? "var(--fg)" : "var(--fg-muted)",
               fontSize: "12px", fontWeight: 700, cursor: "pointer",
               display: "flex", alignItems: "center", gap: "6px",
               boxShadow: isActive ? "0 4px 14px rgba(124,92,252,0.35)" : "none",
-              transition: "all 0.15s ease", whiteSpace: "nowrap",
+              transition: "background 0.15s ease", whiteSpace: "nowrap",
             }}>
               <Icon size={15} />
               {tab.label}
@@ -704,7 +761,8 @@ export default function Admin({ currentUser, onLogout, initialTab, adminRole, ad
       </div>
 
       {/* Content */}
-      <div style={{ flex: 1, overflowY: "auto", padding: "16px" }}>
+      <div className="adm-body" style={{ flex: 1, overflowY: "auto", padding: "16px" }}>
+
         {isStaff && !adminPoint ? (
           <div style={{ textAlign: "center", padding: "60px 20px", color: "var(--fg-muted)" }}>
             <MapPin size={32} color="var(--sc-info-fg)" style={{ marginBottom: "12px" }} />
@@ -882,7 +940,7 @@ function AdminOverview({
         }}>
           <ClipboardCheck size={16} color="var(--fg-accent)" /> งานรอลงมือ
         </div>
-        <div style={{ display: "grid", gridTemplateColumns: "repeat(2, 1fr)", gap: "10px" }}>
+        <div className="adm-grid-2">
           {[
             { label: "โพสต์ของพบรออนุมัติ", value: pendingFoundPosts, icon: PackageSearch, color: "var(--sc-warn-fg)", bg: "var(--sc-warn-bg)", tab: "found" as AdminTab },
             { label: "คำขอเคลมรออนุมัติ", value: pendingClaims, icon: ClipboardCheck, color: "var(--sc-info-fg)", bg: "var(--sc-info-bg)", tab: "claims" as AdminTab },
@@ -936,7 +994,7 @@ function AdminOverview({
       }}>
         <BarChart3 size={16} color="var(--fg-accent)" /> สถานะรายการ
       </div>
-      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "10px" }}>
+      <div className="adm-grid-2">
         {stats.map((s, i) => {
           const Icon = s.icon;
           return (
@@ -1076,6 +1134,10 @@ function AdminFoundApprovals({
     variant?: "danger" | "primary";
     onConfirm: () => void;
   } | null>(null);
+  // ปุ่ม "ตรวจสอบ" — เปิดดูรายละเอียดโพสต์ของพบแบบเต็มจอก่อนตัดสินใจ
+  const [selectedPost, setSelectedPost] = useState<PostItem | null>(null);
+  const [postZoom, setPostZoom] = useState<string | null>(null);
+  const [processingId, setProcessingId] = useState<string | null>(null);
 
   const pending = posts.filter(
     (p) =>
@@ -1107,16 +1169,21 @@ function AdminFoundApprovals({
       message: `ยืนยันว่าตรวจรับของ "${post.title}" ที่จุดรับแล้ว? โพสต์จะถูกเผยแพร่สู่หน้าสาธารณะ และผู้พบจะได้รับแจ้งเตือน`,
       confirmText: "อนุมัติโพสต์",
       onConfirm: async () => {
+        setProcessingId(post.id ?? "");
         try {
           await updateDoc(doc(db, "posts", post.id ?? ""), {
             status: "active",
             approvedAt: serverTimestamp(),
           });
           await notifyFinder(post, "found_approved");
+          setConfirmDialog(null);
+          setSelectedPost(null);
           showToast("อนุมัติโพสต์ของพบแล้ว", "success");
         } catch (e) {
           console.error(e);
           showToast("อนุมัติไม่สำเร็จ กรุณาลองใหม่", "error");
+        } finally {
+          setProcessingId(null);
         }
       },
     });
@@ -1129,16 +1196,21 @@ function AdminFoundApprovals({
       confirmText: "ปฏิเสธโพสต์",
       variant: "danger",
       onConfirm: async () => {
+        setProcessingId(post.id ?? "");
         try {
           await updateDoc(doc(db, "posts", post.id ?? ""), {
             status: "rejected",
             rejectedAt: serverTimestamp(),
           });
           await notifyFinder(post, "found_rejected");
+          setConfirmDialog(null);
+          setSelectedPost(null);
           showToast("ปฏิเสธโพสต์แล้ว", "success");
         } catch (e) {
           console.error(e);
           showToast("ปฏิเสธไม่สำเร็จ กรุณาลองใหม่", "error");
+        } finally {
+          setProcessingId(null);
         }
       },
     });
@@ -1173,21 +1245,36 @@ function AdminFoundApprovals({
           }}>
             <div style={{ display: "flex", gap: "12px" }}>
               {post.imageUrl ? (
-                <img src={post.imageUrl} alt="" style={{
-                  width: "64px", height: "64px", borderRadius: "10px",
-                  objectFit: "cover", flexShrink: 0, border: "1px solid var(--border)",
-                }} />
+                <img
+                  src={post.imageUrl}
+                  alt=""
+                  onClick={() => setSelectedPost(post)}
+                  title="แตะเพื่อตรวจสอบรายละเอียด"
+                  style={{
+                    width: "64px", height: "64px", borderRadius: "10px",
+                    objectFit: "cover", flexShrink: 0, border: "1px solid var(--border)",
+                    cursor: "pointer",
+                  }}
+                />
               ) : (
-                <div style={{
-                  width: "64px", height: "64px", borderRadius: "10px", flexShrink: 0,
-                  backgroundColor: "var(--sc-warn-bg)", color: "var(--sc-warn-fg)",
-                  display: "flex", alignItems: "center", justifyContent: "center",
-                }}>
+                <div
+                  onClick={() => setSelectedPost(post)}
+                  title="แตะเพื่อตรวจสอบรายละเอียด"
+                  style={{
+                    width: "64px", height: "64px", borderRadius: "10px", flexShrink: 0,
+                    backgroundColor: "var(--sc-warn-bg)", color: "var(--sc-warn-fg)",
+                    display: "flex", alignItems: "center", justifyContent: "center",
+                    cursor: "pointer",
+                  }}
+                >
                   <PackageSearch size={24} />
                 </div>
               )}
               <div style={{ flex: 1, minWidth: 0 }}>
-                <div style={{ fontSize: "13.5px", fontWeight: 800, color: "var(--fg)" }}>
+                <div
+                  onClick={() => setSelectedPost(post)}
+                  style={{ fontSize: "13.5px", fontWeight: 800, color: "var(--fg)", cursor: "pointer" }}
+                >
                   {post.title}
                 </div>
                 <div style={{ fontSize: "11px", color: "var(--fg-muted)", marginTop: 2 }}>
@@ -1207,24 +1294,157 @@ function AdminFoundApprovals({
                 <div style={{ fontSize: "10px", color: "var(--fg-faint)", marginTop: 4 }}>ID: {post.id}</div>
               </div>
             </div>
-            <div style={{ display: "flex", gap: "8px", marginTop: "12px" }}>
-              <button onClick={() => handleApprove(post)} style={{
-                flex: 1, padding: "10px", borderRadius: "10px", border: "1px solid var(--sc-ok-border)",
-                backgroundColor: "var(--sc-ok-bg)", color: "var(--sc-ok-fg)", fontSize: "12px", fontWeight: 700,
-                cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", gap: "5px",
-              }}>
-                <CheckCircle2 size={14} /> ตรวจรับแล้ว อนุมัติโพสต์
+            <div style={{ display: "flex", flexDirection: "column", gap: "8px", marginTop: "12px" }}>
+              <button
+                onClick={() => setSelectedPost(post)}
+                style={{
+                  width: "100%", padding: "11px", borderRadius: "10px", border: "1px solid var(--border-strong)",
+                  backgroundColor: "var(--bg-subtle)", color: "var(--fg-strong)", fontSize: "12.5px", fontWeight: 700,
+                  cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", gap: "6px",
+                }}
+              >
+                <Eye size={15} /> ตรวจสอบ
               </button>
-              <button onClick={() => handleReject(post)} style={{
-                flex: 1, padding: "10px", borderRadius: "10px", border: "1px solid var(--sc-danger-border)",
-                backgroundColor: "var(--sc-danger-bg)", color: "var(--sc-danger-fg)", fontSize: "12px", fontWeight: 700,
-                cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", gap: "5px",
-              }}>
-                <XCircle size={14} /> ปฏิเสธ
-              </button>
+              <div style={{ display: "flex", gap: "8px" }}>
+                <button onClick={() => handleApprove(post)} style={{
+                  flex: 1, padding: "10px", borderRadius: "10px", border: "1px solid var(--sc-ok-border)",
+                  backgroundColor: "var(--sc-ok-bg)", color: "var(--sc-ok-fg)", fontSize: "12px", fontWeight: 700,
+                  cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", gap: "5px",
+                }}>
+                  <CheckCircle2 size={14} /> ตรวจรับแล้ว อนุมัติโพสต์
+                </button>
+                <button onClick={() => handleReject(post)} style={{
+                  flex: 1, padding: "10px", borderRadius: "10px", border: "1px solid var(--sc-danger-border)",
+                  backgroundColor: "var(--sc-danger-bg)", color: "var(--sc-danger-fg)", fontSize: "12px", fontWeight: 700,
+                  cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", gap: "5px",
+                }}>
+                  <XCircle size={14} /> ปฏิเสธ
+                </button>
+              </div>
             </div>
           </div>
       )))} 
+
+      {/* หน้าตรวจสอบโพสต์ของพบ — ดูรายละเอียดเต็มก่อนตัดสินใจ */}
+      {selectedPost && (
+        <ReviewSheet
+          open
+          onClose={() => { setSelectedPost(null); setPostZoom(null); }}
+          title="ตรวจสอบโพสต์ของพบ"
+          subtitle={`ผู้พบ: ${selectedPost.reporterName || "ไม่ระบุ"} · ${formatDateShort(selectedPost.createdAt) || "-"}`}
+          badge={{ label: "รอตรวจรับ", bg: "var(--sc-warn-bg)", color: "var(--sc-warn-fg)" }}
+          busy={!!processingId}
+          footer={
+            <>
+              <SheetButton
+                tone="danger"
+                disabled={!!processingId}
+                onClick={() => handleReject(selectedPost)}
+              >
+                <XCircle size={18} /> ปฏิเสธโพสต์
+              </SheetButton>
+              <SheetButton
+                tone="ok"
+                disabled={!!processingId}
+                onClick={() => handleApprove(selectedPost)}
+              >
+                <CheckCircle2 size={18} /> ตรวจรับแล้ว อนุมัติโพสต์
+              </SheetButton>
+            </>
+          }
+        >
+            <ReviewImage src={selectedPost.imageUrl} images={getPostImages(selectedPost)} alt={selectedPost.title} onZoom={setPostZoom} />
+
+          <div>
+            <div style={{ fontSize: "21px", fontWeight: 800, color: "var(--fg)", lineHeight: 1.3 }}>
+              {selectedPost.title}
+            </div>
+            <div style={{
+              fontSize: "11px", color: "var(--fg-faint)", marginTop: "5px",
+              fontFamily: "'SF Mono', monospace", wordBreak: "break-all",
+            }}>
+              ID: {selectedPost.id}
+            </div>
+          </div>
+
+          {selectedPost.desc && (
+            <div style={{
+              padding: "14px 16px", backgroundColor: "var(--bg-subtle)", borderRadius: "12px",
+              border: "1px solid var(--border)",
+            }}>
+              <div style={{
+                fontSize: "12px", fontWeight: 700, color: "var(--fg-accent)",
+                marginBottom: "6px", display: "flex", alignItems: "center", gap: "6px",
+              }}>
+                <FileText size={14} /> รายละเอียดจากผู้พบ
+              </div>
+              <div style={{
+                fontSize: "14.5px", color: "var(--fg-secondary)", lineHeight: 1.75,
+                whiteSpace: "pre-wrap", wordBreak: "break-word",
+              }}>
+                {selectedPost.desc}
+              </div>
+            </div>
+          )}
+
+          <InfoGrid>
+            <InfoRow icon={User} label="ผู้พบ" value={selectedPost.reporterName || "ไม่ระบุ"} />
+            {selectedPost.reporterPhone && (
+              <InfoRow icon={Phone} label="เบอร์โทรผู้พบ" value={selectedPost.reporterPhone} />
+            )}
+            <InfoRow
+              icon={ShieldAlert}
+              label="จุดฝาก/คืนของ"
+              value={selectedPost.depositLocation || "ไม่ระบุ"}
+              color="var(--sc-ok-fg)"
+              bg="var(--sc-ok-bg)"
+            />
+            <InfoRow
+              icon={MapPin}
+              label="สถานที่พบ"
+              value={selectedPost.locationName || selectedPost.location || selectedPost.building || "ไม่ระบุ"}
+            />
+            {(selectedPost.category || selectedPost.faculty) && (
+              <InfoRow
+                icon={GraduationCap}
+                label="ประเภท / คณะ"
+                value={[selectedPost.category, selectedPost.faculty].filter(Boolean).join(" · ")}
+              />
+            )}
+            {selectedPost.refCode && (
+              <InfoRow icon={IdCard} label="รหัสอ้างอิง" value={selectedPost.refCode} />
+            )}
+            {selectedPost.securityZone && (
+              <InfoRow icon={ShieldCheck} label="พื้นที่ความปลอดภัย" value={selectedPost.securityZone} />
+            )}
+            <InfoRow
+              icon={Clock}
+              label="วันที่พบ"
+              value={[formatDateShort(selectedPost.date), formatClockTime(selectedPost.createdAt)]
+                .filter(Boolean).join(" ") || "-"}
+            />
+            <InfoRow icon={Clock} label="ส่งโพสต์เมื่อ" value={formatTime(selectedPost.createdAt) || "-"} />
+          </InfoGrid>
+
+          <div style={{
+            padding: "12px 14px", backgroundColor: "var(--sc-warn-bg)", borderRadius: "12px",
+            border: "1px solid var(--sc-warn-border)", fontSize: "13px", color: "var(--sc-warn-fg)",
+            lineHeight: 1.6, display: "flex", alignItems: "flex-start", gap: "8px",
+          }}>
+            <PackageSearch size={16} style={{ flexShrink: 0, marginTop: "2px" }} />
+            <span>
+              ตรวจของจริงกับผู้พบที่จุดรับก่อนเสมอ ถ้าของตรงกับโพสต์ของหาย กด
+              &quot;ตรวจรับแล้ว อนุมัติโพสต์&quot; ได้เลย
+            </span>
+          </div>
+        </ReviewSheet>
+      )}
+
+        <ImageLightbox
+          src={postZoom}
+          images={selectedPost ? getPostImages(selectedPost) : null}
+          onClose={() => setPostZoom(null)}
+        />
 
       {confirmDialog && (
         <ConfirmModal
@@ -1233,11 +1453,14 @@ function AdminFoundApprovals({
           message={confirmDialog.message}
           confirmText={confirmDialog.confirmText}
           variant={confirmDialog.variant}
+          busy={!!processingId}
           onConfirm={() => {
             confirmDialog.onConfirm();
+          }}
+          onCancel={() => {
+            if (processingId) return;
             setConfirmDialog(null);
           }}
-          onCancel={() => setConfirmDialog(null)}
         />
       )}
     </div>
@@ -1262,6 +1485,14 @@ function AdminClaims({
   const [claimPost, setClaimPost] = useState<PostItem | null>(null);
   const [claimPostZoom, setClaimPostZoom] = useState<string | null>(null);
   const [processingId, setProcessingId] = useState<string | null>(null);
+  // กรอบถ่ายรูปหลักฐาน (บังคับก่อนอนุมัติ) + ข้อความผิดพลาดที่ค้างไว้ให้เห็นในกรอบ
+  const [handoverClaim, setHandoverClaim] = useState<AdminClaim | null>(null);
+  const [handoverError, setHandoverError] = useState<string | null>(null);
+  // หลักฐานการส่งมอบของคำขอที่เปิดดูอยู่ (ผูกกับ claimId เพื่อไม่ให้รูปค้างข้ามคำขอ)
+  const [claimHandover, setClaimHandover] = useState<{
+    claimId: string;
+    data: HandoverEvidence | null;
+  } | null>(null);
   const [confirmDialog, setConfirmDialog] = useState<{
     title: string;
     message: string;
@@ -1318,6 +1549,24 @@ function AdminClaims({
 
   // หมายเหตุ: การจัดการคำขอหมดอายุใช้กลไกเดียวคือ expireStaleClaims (AdminPanel root effect)
   // ที่ re-run เมื่อเปลี่ยน tab/จุด — ไม่ทำซ้ำที่นี่ (เดิมมี 2 กลไก เสี่ยงแจ้งเตือน/เขียนซ้ำ)
+
+  // โหลดหลักฐานการส่งมอบเมื่อเปิดดูคำขอที่อนุมัติแล้ว
+  // เก็บผลผูกกับ claimId เพื่อแสดงเฉพาะตอนเปิดคำขอใบเดียวกัน
+  // (ผู้ขอ/คนอื่นอ่านไม่ได้ตามกฎ → คืน null ไม่ทำให้หน้าจอพัง)
+  const selectedClaimId = selectedClaim?.id ?? null;
+  const selectedClaimApproved = selectedClaim?.status === "approved";
+  useEffect(() => {
+    if (!selectedClaimId || !selectedClaimApproved) return;
+    let cancelled = false;
+    loadHandoverEvidence(selectedClaimId).then((ev) => {
+      if (!cancelled) setClaimHandover({ claimId: selectedClaimId, data: ev });
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [selectedClaimId, selectedClaimApproved]);
+  const claimHandoverShown =
+    claimHandover?.claimId === selectedClaimId ? claimHandover.data : null;
 
   const filtered = claims.filter((c) => {
     const q = searchText.toLowerCase();
@@ -1380,21 +1629,51 @@ function AdminClaims({
     }
   };
 
+  /* เปิดกรอบถ่ายรูปหลักฐาน — บังคับก่อนบันทึกการอนุมัติ
+     ยืนยันว่าจะส่งมอบของให้ถูกคนก่อนเปิดกล้อง และซ่อมเมื่อมีสิทธิ์จริง */
   const handleApprove = (claim: AdminClaim) => {
     if (processingId) return;
-    setConfirmDialog({
-      title: "ยืนยันการส่งมอบของ",
-      message: `ยืนยันว่าคืนของ "${claim.postTitle}" ให้ "${claim.claimantName}" แล้วใช่ไหม? สถานะโพสต์จะเปลี่ยนเป็น 'คืนแล้ว' และปิดคำขอรับของรายอื่นในคิวอัตโนมัติ`,
-      confirmText: "ยืนยันส่งมอบ",
-      variant: "primary",
-      onConfirm: async () => {
-        setProcessingId(claim.id);
-        try {
-          const nowIso = new Date().toISOString();
-          // ใช้ transaction + precondition กัน "ส่งของชิ้นเดียวให้ 2 คน" (สองแท็บ/สองเจ้าหน้าที่กดพร้อมกัน)
-          // อนุมัติได้เฉพาะคำขอที่กำลังจองโพสต์นี้อยู่จริง (reservationClaimId ตรงกับคำขอนี้) — กันอนุมัติคำขอซ้ำซ้อน
-          const postId = claim.postId;
-          if (postId) {
+    setHandoverError(null);
+    setHandoverClaim(claim);
+  };
+
+  /* บันทึกการส่งมอบ 3 จังหวะ (เรียงตามข้อจำกัดของกฎ Firestore)
+     1) อัปโหลดรูปหลักฐาน → ล้มเหลว = ยกเลิก ไม่อนุมัติ (fail-closed)
+     2) commit หลักฐานลง claims/{id}/handover/evidence (claim ยัง pending)
+     3) transaction อนุมัติ — กฎตรวจ hasHandoverEvidence จึงผ่าน
+        ถ้าพัง → ลบหลักฐานทิ้งเพื่อไม่ให้เหลือหลักฐานกำพร้า */
+  const confirmHandover = async (claim: AdminClaim, file: File) => {
+    if (processingId) return;
+    setProcessingId(claim.id);
+    setHandoverError(null);
+    const evidenceRef = doc(db, "claims", claim.id, "handover", "evidence");
+    let evidenceWritten = false;
+    try {
+      // จังหวะที่ 1: อัปโหลดรูปหลักฐาน
+      let photoUrl: string;
+      try {
+        photoUrl = await uploadToCloudinary(file);
+      } catch (uploadError) {
+        console.error("Error uploading handover evidence:", uploadError);
+        setHandoverError("อัปโหลดรูปหลักฐานไม่สำเร็จ กรุณาลองใหม่อีกครั้ง (ยังไม่ได้อนุมัติคำขอ)");
+        return;
+      }
+
+      // จังหวะที่ 2: บันทึกหลักฐาน (commit แยก — กฎอ่านค่าก่อนเริ่ม transaction)
+      await setDoc(evidenceRef, {
+        photoUrl,
+        depositLocation: claim.depositLocation || "",
+        capturedByUid: adminUid || "",
+        capturedAt: new Date().toISOString(),
+      });
+      evidenceWritten = true;
+
+      // จังหวะที่ 3: อนุมัติ (transaction เดิมที่กันส่งของชิ้นเดียวให้ 2 คน)
+      const nowIso = new Date().toISOString();
+      // ใช้ transaction + precondition กัน "ส่งของชิ้นเดียวให้ 2 คน" (สองแท็บ/สองเจ้าหน้าที่กดพร้อมกัน)
+      // อนุมัติได้เฉพาะคำขอที่กำลังจองโพสต์นี้อยู่จริง (reservationClaimId ตรงกับคำขอนี้) — กันอนุมัติคำขอซ้ำซ้อน
+      const postId = claim.postId;
+      if (postId) {
             await runTransaction(db, async (tx) => {
               const postRef = doc(db, "posts", postId);
               const postSnap = await tx.get(postRef);
@@ -1476,25 +1755,33 @@ function AdminClaims({
             }
           }
           await notifyClaimant(claim, "approved");
-          setConfirmDialog(null);
+          setHandoverClaim(null);
+          setHandoverError(null);
           setSelectedClaim(null);
           setClaimPost(null);
           setClaimPostZoom(null);
         } catch (e) {
-          console.error(e);
-          const msg = (e as { message?: string })?.message || "";
+          console.error("[confirmHandover] error:", e);
+          const msg = (e as { message?: string; code?: string })?.message || "";
+          const code = (e as { code?: string })?.code || "";
+          const full = code ? `[${code}] ${msg}` : msg;
+          // อนุมัติไม่สำเร็จ → ลบหลักฐานทิ้ง (กฎอนุญาตลบตราบใดที่ claim ยัง pending)
+          if (evidenceWritten) {
+            deleteDoc(evidenceRef).catch((de) => console.error("[confirmHandover] cleanup failed:", de));
+          }
           if (msg === "already_resolved") {
+            setHandoverError("โพสต์นี้ถูกส่งมอบ (resolved) ไปแล้วในแท็บอื่น");
             showToast("โพสต์นี้ถูกส่งมอบ (resolved) ไปแล้วในแท็บอื่น", "error");
           } else if (msg === "wrong_reservation_claim") {
+            setHandoverError("คำขอนี้ไม่ใช่ผู้ที่จองโพสต์ไว้อยู่จริง ตรวจสอบคำขออีกครั้ง");
             showToast("คำขอนี้ไม่ใช่ผู้ที่จองโพสต์ไว้อยู่จริง ตรวจสอบคำขออีกครั้ง", "error");
           } else {
-            showToast("เกิดข้อผิดพลาดในการยืนยัน", "error");
+            setHandoverError(full || "เกิดข้อผิดพลาดในการยืนยัน ยังไม่ได้อนุมัติคำขอ");
+            showToast(full || "เกิดข้อผิดพลาดในการยืนยัน ยังไม่ได้อนุมัติคำขอ", "error");
           }
         } finally {
           setProcessingId(null);
         }
-      },
-    });
   };
 
   const handleReject = (claim: AdminClaim) => {
@@ -1512,46 +1799,57 @@ function AdminClaims({
             reviewedAt: nowIso,
             reviewedByUid: adminUid || "",
           });
-          const rejPostId = claim.postId;
-          if (rejPostId) {
-            try {
-              const others = await getDocs(
-                isStaff && adminPoint
-                  ? query(
-                      collection(db, "claims"),
-                      where("postId", "==", rejPostId),
-                      where("status", "==", "pending"),
-                      where("depositLocation", "==", adminPoint)
-                    )
-                  : query(
-                      collection(db, "claims"),
-                      where("postId", "==", rejPostId),
-                      where("status", "==", "pending")
-                    )
-              );
-              // เคลียร์ reservation ทุกครั้งที่ปฏิเสธ (กันโพสต์ติดอยู่กับ claim ที่ reject แล้ว)
-              const postRef = doc(db, "posts", rejPostId);
-              const postSnap = await getDoc(postRef);
-              const postData = postSnap.data();
-              if (
-                postData &&
-                postData.status !== "resolved" &&
-                postData.status !== "suspended" &&
-                postData.status !== "under_investigation"
-              ) {
-                const patch: { [k: string]: unknown } = {
-                  reservationClaimId: deleteField(),
-                  inProgressAt: deleteField(),
-                };
-                if (others.empty) {
-                  patch.status = "active";
-                }
-                await updateDoc(postRef, patch).catch(() => {});
-              }
-            } catch (e) {
-              console.error("Error releasing post:", e);
+      const rejPostId = claim.postId;
+      if (rejPostId) {
+        // เช็คว่ายังมี claim ที่ "รออยู่" (pending) ของโพสต์นี้หรือไม่
+        // แยก try/catch เฉพาะการ query: ถ้าล้มเหลวห้ามทำให้การปล่อยโพสต์ด้านล่างพังตาม
+        // (เดิม query อยู่ใน try เดียวกับการปล่อยโพสต์ → query error แล้วโพสต์ค้าง in_progress ตลอด)
+        let hasOtherPending = true; // ค่าเริ่มต้นแบบอนุรักษ์: ไม่รู้ = ไม่คืนสถานะ active
+        try {
+          const others = await getDocs(
+            isStaff && adminPoint
+              ? query(
+                  collection(db, "claims"),
+                  where("postId", "==", rejPostId),
+                  where("status", "==", "pending"),
+                  where("depositLocation", "==", adminPoint)
+                )
+              : query(
+                  collection(db, "claims"),
+                  where("postId", "==", rejPostId),
+                  where("status", "==", "pending")
+                )
+          );
+          hasOtherPending = !others.empty;
+        } catch (queryError) {
+          console.error("Error checking remaining pending claims:", queryError);
+        }
+
+        // เคลียร์ reservation ทุกครั้งที่ปฏิเสธ (กันโพสต์ติดอยู่กับ claim ที่ reject แล้ว)
+        try {
+          const postRef = doc(db, "posts", rejPostId);
+          const postSnap = await getDoc(postRef);
+          const postData = postSnap.data();
+          if (
+            postData &&
+            postData.status !== "resolved" &&
+            postData.status !== "suspended" &&
+            postData.status !== "under_investigation"
+          ) {
+            const patch: { [k: string]: unknown } = {
+              reservationClaimId: deleteField(),
+              inProgressAt: deleteField(),
+            };
+            // คืนสถานะ active ได้เฉพาะเมื่อยืนยันแน่ใจว่าไม่มี claim ค้างอยู่
+            if (!hasOtherPending) {
+              patch.status = "active";
             }
+            await updateDoc(postRef, patch).catch(() => {});
           }
+        } catch (e) {
+          console.error("Error releasing post:", e);
+        }
+      }
           await notifyClaimant(claim, "rejected");
           setConfirmDialog(null);
           setSelectedClaim(null);
@@ -1644,7 +1942,7 @@ function AdminClaims({
                       color: claim.claimType === "student" ? "var(--sc-info-fg)" : "var(--sc-warn-fg)",
                       border: `1px solid ${claim.claimType === "student" ? "var(--sc-info-border)" : "var(--sc-warn-border)"}`,
                     }}>
-                      {claim.claimType === "student" ? "นิสิต" : "บุคคลทั่วไป"}
+                      {claim.claimType === "student" ? "นิสิตและบุคลากร" : "บุคคลทั่วไป"}
                     </span>
                   </div>
                   <div style={{ fontSize: "11px", color: "var(--fg-secondary)", lineHeight: 1.5 }}>
@@ -1725,7 +2023,7 @@ function AdminClaims({
                       cursor: isProcessing ? "not-allowed" : "pointer",
                       display: "flex", alignItems: "center", justifyContent: "center", gap: "5px",
                     }}>
-                      <CheckCircle2 size={14} /> ยืนยันส่งมอบ
+                      <Camera size={14} /> ถ่ายรูปแล้วยืนยันส่งมอบ
                     </button>
                     <button onClick={() => handleReject(claim)} disabled={isProcessing} style={{
                       flex: 1, padding: "9px", borderRadius: "8px", border: "1px solid var(--sc-danger-border)",
@@ -1745,264 +2043,322 @@ function AdminClaims({
 
       {/* Claim Detail Modal */}
       {selectedClaim && (
-        <div style={{
-          position: "fixed", inset: 0, backgroundColor: "rgba(5,4,10,0.72)",
-          backdropFilter: "blur(6px)",
-          zIndex: 100, display: "flex", alignItems: "center", justifyContent: "center",
-          padding: "20px",
-        }}>
-          <div style={{
-            backgroundColor: "var(--bg-card)", borderRadius: "20px", padding: "22px",
-            width: "100%", maxWidth: "420px", maxHeight: "80vh", overflowY: "auto",
-            boxShadow: "0 25px 60px rgba(0,0,0,0.6)",
-            border: "1px solid var(--border)",
-          }}>
-            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "16px" }}>
-              <h3 style={{ fontSize: "16px", fontWeight: 800, color: "var(--fg)", margin: 0 }}>
-                ตรวจสอบคำขอรับของ
-              </h3>
-              <button onClick={() => { setSelectedClaim(null); setClaimPost(null); setClaimPostZoom(null); }} style={{
-                background: "var(--bg-hover)", border: "none", borderRadius: "50%", width: "30px", height: "30px",
-                display: "flex", alignItems: "center", justifyContent: "center", cursor: "pointer", color: "var(--fg-secondary)",
+        <ReviewSheet
+          open
+          onClose={() => { setSelectedClaim(null); setClaimPost(null); setClaimPostZoom(null); }}
+          title="ตรวจสอบคำขอรับของ"
+          subtitle={`${selectedClaim.postTitle || "-"} · ผู้ขอ: ${selectedClaim.claimantName || "ไม่ระบุ"}`}
+          badge={getStatusBadge(selectedClaim)}
+          busy={processingId === selectedClaim.id}
+          footer={
+            selectedClaim.status === "pending" ? (
+              <>
+                <SheetButton
+                  tone="danger"
+                  disabled={processingId === selectedClaim.id}
+                  onClick={() => handleReject(selectedClaim)}
+                >
+                  <XCircle size={18} /> ปฏิเสธคำขอ
+                </SheetButton>
+                <SheetButton
+                  tone="ok"
+                  disabled={processingId === selectedClaim.id}
+                  onClick={() => handleApprove(selectedClaim)}
+                  icon={Camera}
+                >
+                  ถ่ายรูปแล้วยืนยันส่งมอบ
+                </SheetButton>
+              </>
+            ) : undefined
+          }
+        >
+          {selectedClaim.evidenceUrl && (
+            <div>
+              <div style={{
+                fontSize: "12px", fontWeight: 700, color: "var(--fg-accent)",
+                marginBottom: "6px", display: "flex", alignItems: "center", gap: "6px",
               }}>
-                <X size={16} />
-              </button>
-            </div>
-
-            {selectedClaim.evidenceUrl && (
-              <div style={{ marginBottom: "14px" }}>
-                <div style={{ fontSize: "11px", fontWeight: 700, color: "var(--fg-accent)", marginBottom: "6px" }}>
-                  รูปหลักฐานจากผู้ขอ
-                </div>
-                <a href={selectedClaim.evidenceUrl} target="_blank" rel="noopener noreferrer" style={{ display: "block" }}>
-                  <img src={selectedClaim.evidenceUrl} alt="หลักฐาน" style={{
-                    width: "100%", maxHeight: "260px", objectFit: "cover",
-                    borderRadius: "12px", border: "1px solid var(--border)",
-                  }} />
-                </a>
+                <ShieldCheck size={14} /> รูปหลักฐานจากผู้ขอ
               </div>
-            )}
+              <ReviewImage
+                src={selectedClaim.evidenceUrl}
+                alt="หลักฐาน"
+                onZoom={setClaimPostZoom}
+              />
+            </div>
+          )}
 
-            {selectedClaim.postImageUrl && (
-              <img src={selectedClaim.postImageUrl} alt="" style={{
-                width: "100%", height: "180px", objectFit: "cover", borderRadius: "12px", marginBottom: "14px",
-                border: "1px solid var(--border)",
-              }} />
-            )}
+          {/* หลักฐานการส่งมอบ (รูปที่แอดมินถ่ายตอนกดอนุมัติ) */}
+          {selectedClaim.status === "approved" && (
+            <div>
+              <div style={{
+                fontSize: "12px", fontWeight: 700, color: "var(--sc-ok-fg)",
+                marginBottom: "6px", display: "flex", alignItems: "center", gap: "6px",
+              }}>
+                <Camera size={14} /> หลักฐานการส่งมอบ (ถ่ายโดยแอดมิน)
+              </div>
+              {claimHandoverShown?.photoUrl ? (
+                <>
+                  <ReviewImage
+                    src={claimHandoverShown.photoUrl}
+                    alt="หลักฐานการส่งมอบ"
+                    onZoom={setClaimPostZoom}
+                  />
+                  {claimHandoverShown.capturedAt && (
+                    <div style={{ fontSize: "11.5px", color: "var(--fg-muted)", marginTop: "6px" }}>
+                      ถ่ายเมื่อ {formatTime(claimHandoverShown.capturedAt) || claimHandoverShown.capturedAt}
+                    </div>
+                  )}
+                </>
+              ) : (
+                <div style={{
+                  padding: "12px 14px", backgroundColor: "var(--sc-warn-bg)",
+                  border: "1px solid var(--sc-warn-border)", borderRadius: "12px",
+                  fontSize: "12.5px", color: "var(--sc-warn-fg)", lineHeight: 1.6,
+                  display: "flex", alignItems: "flex-start", gap: "8px",
+                }}>
+                  <AlertTriangle size={16} style={{ flexShrink: 0, marginTop: "2px" }} />
+                  <span>ไม่พบรูปหลักฐานการส่งมอบ (อาจเป็นคำขอที่อนุมัติก่อนมีระบบนี้)</span>
+                </div>
+              )}
+            </div>
+          )}
 
-            <div style={{ fontSize: "18px", fontWeight: 800, color: "var(--fg)", marginBottom: "12px" }}>
+          {selectedClaim.postImageUrl && (
+            <div>
+              <div style={{
+                fontSize: "12px", fontWeight: 700, color: "var(--fg-accent)",
+                marginBottom: "6px", display: "flex", alignItems: "center", gap: "6px",
+              }}>
+                <PackageSearch size={14} /> รูปในโพสต์ที่ถูกขอรับ
+              </div>
+              <ReviewImage
+                src={selectedClaim.postImageUrl}
+                alt="โพสต์"
+                onZoom={setClaimPostZoom}
+              />
+            </div>
+          )}
+
+          <div>
+            <div style={{ fontSize: "21px", fontWeight: 800, color: "var(--fg)", lineHeight: 1.3 }}>
               {selectedClaim.postTitle}
             </div>
+            <div style={{ fontSize: "12px", color: "var(--fg-faint)", marginTop: "5px" }}>
+              คำขอ ID: {selectedClaim.id}
+            </div>
+          </div>
 
-            <button
-              onClick={() => openClaimPost(selectedClaim)}
-              disabled={!!processingId}
-              style={{
-                width: "100%", padding: "10px", borderRadius: "10px", border: "1px solid #3a2a5a",
-                backgroundColor: "var(--bg-hover)", color: "var(--fg-accent)", fontSize: "12px", fontWeight: 700,
-                cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", gap: "5px",
-                marginBottom: "12px",
-              }}
-            >
-              <Eye size={14} /> ดูรายละเอียดโพสต์
-            </button>
+          <SheetButton
+            tone="neutral"
+            disabled={!!processingId}
+            onClick={() => openClaimPost(selectedClaim)}
+          >
+            <Eye size={18} /> ดูรายละเอียดโพสต์ฉบับเต็ม
+          </SheetButton>
 
-            {[
-              { icon: User, label: "ผู้ขอรับของ", value: selectedClaim.claimantName || "-", color: "var(--sc-info-fg)", bg: "var(--sc-info-bg)" },
-              { icon: GraduationCap, label: "ประเภทผู้ขอ", value: selectedClaim.claimType === "student" ? "นิสิต" : "บุคคลทั่วไป", color: selectedClaim.claimType === "student" ? "var(--sc-info-fg)" : "var(--sc-warn-fg)", bg: selectedClaim.claimType === "student" ? "var(--sc-info-bg)" : "var(--sc-warn-bg)" },
-              { icon: Clock, label: "ส่งคำขอเมื่อ", value: formatTime(selectedClaim.createdAt) || "-", color: "var(--sc-warn-fg)", bg: "var(--sc-warn-bg)" },
-              { icon: MapPin, label: "สถานะ", value: getStatusBadge(selectedClaim).label, color: "var(--sc-ok-fg)", bg: "var(--sc-ok-bg)" },
-            ].map((row, i) => (
-              <div key={i} style={{
-                display: "flex", alignItems: "center", gap: "10px",
-                padding: "10px 12px", borderRadius: "10px", backgroundColor: row.bg,
-                marginBottom: "8px",
-              }}>
-                <row.icon size={16} color={row.color} />
-                <div>
-                  <div style={{ fontSize: "10px", color: "var(--fg-muted)", fontWeight: 600 }}>{row.label}</div>
-                  <div style={{ fontSize: "12px", fontWeight: 700, color: "var(--fg-strong)" }}>{row.value}</div>
-                </div>
-              </div>
-            ))}
-
+          <InfoGrid>
+            <InfoRow
+              icon={User}
+              label="ผู้ขอรับของ"
+              value={selectedClaim.claimantName || "-"}
+              color="var(--sc-info-fg)"
+              bg="var(--sc-info-bg)"
+            />
+            <InfoRow
+              icon={GraduationCap}
+              label="ประเภทผู้ขอ"
+              value={selectedClaim.claimType === "student" ? "นิสิตและบุคลากร" : "บุคคลทั่วไป"}
+              color={selectedClaim.claimType === "student" ? "var(--sc-info-fg)" : "var(--sc-warn-fg)"}
+              bg={selectedClaim.claimType === "student" ? "var(--sc-info-bg)" : "var(--sc-warn-bg)"}
+            />
+            {selectedClaim.matchedPostId && (
+              <InfoRow
+                icon={Link2}
+                label="จับคู่กับโพสต์ของหายของผู้ขอ"
+                value={selectedClaim.matchedPostTitle || selectedClaim.matchedPostId}
+                color="var(--sc-ok-fg)"
+                bg="var(--sc-ok-bg)"
+              />
+            )}
             {selectedClaim.studentId && (
-              <div style={{
-                display: "flex", alignItems: "center", gap: "10px",
-                padding: "10px 12px", borderRadius: "10px", backgroundColor: "var(--sc-info-bg)", marginBottom: "8px",
-              }}>
-                <IdCard size={16} color="var(--sc-info-fg)" />
-                <div>
-                  <div style={{ fontSize: "10px", color: "var(--fg-muted)", fontWeight: 600 }}>รหัสนิสิต</div>
-                  <div style={{ fontSize: "12px", fontWeight: 700, color: "var(--fg-strong)" }}>{selectedClaim.studentId}</div>
-                </div>
-              </div>
+              <InfoRow
+                icon={IdCard}
+                label="รหัสนิสิต"
+                value={selectedClaim.studentId}
+                color="var(--sc-info-fg)"
+                bg="var(--sc-info-bg)"
+              />
             )}
-
-            {((selectedClaim.phone || selectedClaim.contact) && (selectedClaim.phone || selectedClaim.contact) !== "ไม่ระบุช่องทางติดต่อ") && (
-              <div style={{
-                display: "flex", alignItems: "center", gap: "10px",
-                padding: "10px 12px", borderRadius: "10px", backgroundColor: "var(--bg-hover)", marginBottom: "8px",
-              }}>
-                <ShieldCheck size={16} color="var(--fg-accent)" />
-                <div>
-                  <div style={{ fontSize: "10px", color: "var(--fg-muted)", fontWeight: 600 }}>เบอร์โทร</div>
-                  <div style={{ fontSize: "12px", fontWeight: 700, color: "var(--fg-strong)" }}>{selectedClaim.phone || selectedClaim.contact}</div>
-                </div>
-              </div>
+            {((selectedClaim.phone || selectedClaim.contact) &&
+              (selectedClaim.phone || selectedClaim.contact) !== "ไม่ระบุช่องทางติดต่อ") && (
+              <InfoRow
+                icon={Phone}
+                label="เบอร์โทร / ช่องทางติดต่อ"
+                value={selectedClaim.phone || selectedClaim.contact || "-"}
+              />
             )}
-
             {selectedClaim.email && (
-              <div style={{
-                display: "flex", alignItems: "center", gap: "10px",
-                padding: "10px 12px", borderRadius: "10px", backgroundColor: "var(--bg-hover)", marginBottom: "8px",
-              }}>
-                <Mail size={16} color="var(--fg-accent)" />
-                <div>
-                  <div style={{ fontSize: "10px", color: "var(--fg-muted)", fontWeight: 600 }}>อีเมล</div>
-                  <div style={{ fontSize: "12px", fontWeight: 700, color: "var(--fg-strong)" }}>{selectedClaim.email}</div>
-                </div>
-              </div>
+              <InfoRow icon={Mail} label="อีเมล" value={selectedClaim.email} />
             )}
+            <InfoRow
+              icon={Clock}
+              label="ส่งคำขอเมื่อ"
+              value={formatTime(selectedClaim.createdAt) || "-"}
+              color="var(--sc-warn-fg)"
+              bg="var(--sc-warn-bg)"
+            />
+            {selectedClaim.expiresAt && (
+              <InfoRow
+                icon={Clock}
+                label={selectedClaim.pickupDate ? "นัดรับ" : "หมดอายุใน"}
+                value={formatTime(selectedClaim.expiresAt) || "-"}
+                color="var(--sc-warn-fg)"
+                bg="var(--sc-warn-bg)"
+              />
+            )}
+            {selectedClaim.depositLocation && (
+              <InfoRow
+                icon={MapPin}
+                label="จุดฝาก/คืน"
+                value={selectedClaim.depositLocation}
+                color="var(--sc-ok-fg)"
+                bg="var(--sc-ok-bg)"
+              />
+            )}
+            <InfoRow
+              icon={MapPin}
+              label="สถานะคำขอ"
+              value={getStatusBadge(selectedClaim).label}
+              color="var(--sc-ok-fg)"
+              bg="var(--sc-ok-bg)"
+            />
+          </InfoGrid>
 
-            {selectedClaim.note && (
+          {selectedClaim.note && (
+            <div style={{
+              padding: "14px 16px", backgroundColor: "var(--bg-subtle)", borderRadius: "12px",
+              border: "1px solid var(--border)",
+            }}>
               <div style={{
-                padding: "12px", backgroundColor: "var(--bg-subtle)", borderRadius: "10px",
-                fontSize: "12px", color: "var(--fg-secondary)", lineHeight: 1.6, marginBottom: "12px",
-                border: "1px solid var(--border)",
+                fontSize: "12px", fontWeight: 700, color: "var(--fg-accent)",
+                marginBottom: "6px", display: "flex", alignItems: "center", gap: "6px",
               }}>
-                <div style={{ fontSize: "11px", fontWeight: 700, color: "var(--fg-accent)", marginBottom: "4px" }}>
-                  รายละเอียดจากผู้ขอ
-                </div>
+                <FileText size={14} /> รายละเอียดจากผู้ขอ
+              </div>
+              <div style={{
+                fontSize: "14.5px", color: "var(--fg-secondary)", lineHeight: 1.75,
+                whiteSpace: "pre-wrap", wordBreak: "break-word",
+              }}>
                 {selectedClaim.note}
               </div>
-            )}
+            </div>
+          )}
 
-            {selectedClaim.status === "pending" && (
-              <div style={{ display: "flex", gap: "10px", marginTop: "8px" }}>
-                <button onClick={() => handleApprove(selectedClaim)} disabled={processingId === selectedClaim.id} style={{
-                  flex: 1, padding: "12px", borderRadius: "12px", border: "none",
-                  backgroundColor: "#10b981", color: "var(--accent-fg)", fontSize: "13px", fontWeight: 700,
-                  cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", gap: "6px",
-                }}>
-                  <CheckCircle2 size={16} /> อนุมัติคำขอ
-                </button>
-                <button onClick={() => handleReject(selectedClaim)} disabled={processingId === selectedClaim.id} style={{
-                  flex: 1, padding: "12px", borderRadius: "12px", border: "none",
-                  backgroundColor: "#dc2626", color: "var(--fg)", fontSize: "13px", fontWeight: 700,
-                  cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", gap: "6px",
-                }}>
-                  <XCircle size={16} /> ปฏิเสธ
-                </button>
-              </div>
-            )}
-          </div>
-        </div>
+          {selectedClaim.status === "pending" && (
+            <div style={{
+              padding: "12px 14px", backgroundColor: "var(--sc-warn-bg)", borderRadius: "12px",
+              border: "1px solid var(--sc-warn-border)", fontSize: "13px", color: "var(--sc-warn-fg)",
+              lineHeight: 1.6, display: "flex", alignItems: "flex-start", gap: "8px",
+            }}>
+              <AlertTriangle size={16} style={{ flexShrink: 0, marginTop: "2px" }} />
+              <span>
+                ยืนยันกับผู้ขอด้วยตัวเองก่อนส่งมอบของ — ปุ่ม &quot;ถ่ายรูปแล้วยืนยันส่งมอบ&quot;
+                จะเปิดกล้องให้ถ่ายหลักฐาน และปิดคำขออื่นของโพสต์นี้อัตโนมัติ
+              </span>
+            </div>
+          )}
+        </ReviewSheet>
+      )}
+
+      {/* กรอบถ่ายรูปหลักฐาน — บังคับก่อนบันทึกการอนุมัติ
+          (mount/unmount ตาม handoverClaim → เริ่มรูปใหม่ทุกครั้งที่เปิด) */}
+      {handoverClaim && (
+        <HandoverCaptureSheet
+          target={handoverClaim}
+          busy={processingId === handoverClaim.id}
+          error={handoverError}
+          onCancel={() => {
+            if (processingId) return;
+            setHandoverClaim(null);
+            setHandoverError(null);
+          }}
+          onConfirm={(file) => confirmHandover(handoverClaim, file)}
+        />
       )}
 
       {/* Post Detail Modal (ที่เปิดจากคำขอรับของ) */}
       {claimPost && (
-        <div style={{
-          position: "fixed", inset: 0, backgroundColor: "rgba(5,4,10,0.72)",
-          backdropFilter: "blur(6px)",
-          zIndex: 101, display: "flex", alignItems: "center", justifyContent: "center",
-          padding: "20px",
-        }}>
-          <div style={{
-            backgroundColor: "var(--bg-card)", borderRadius: "20px", padding: "22px",
-            width: "100%", maxWidth: "420px", maxHeight: "80vh", overflowY: "auto",
-            boxShadow: "0 25px 60px rgba(0,0,0,0.6)",
-            border: "1px solid var(--border)",
-          }}>
-            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "14px" }}>
-              <h3 style={{ fontSize: "16px", fontWeight: 800, color: "var(--fg)", margin: 0 }}>รายละเอียดโพสต์</h3>
-              <button onClick={() => { setClaimPost(null); setClaimPostZoom(null); }} style={{
-                background: "var(--bg-hover)", border: "none", borderRadius: "50%", width: "30px", height: "30px",
-                display: "flex", alignItems: "center", justifyContent: "center", cursor: "pointer", color: "var(--fg-secondary)",
-              }}>
-                <X size={16} />
-              </button>
-            </div>
+        <ReviewSheet
+          open
+          onClose={() => { setClaimPost(null); setClaimPostZoom(null); }}
+          title="รายละเอียดโพสต์"
+          subtitle={claimPost.title}
+          zIndex={101}
+          footer={
+            <SheetButton
+              tone="neutral"
+              onClick={() => { setClaimPost(null); setClaimPostZoom(null); }}
+            >
+              <X size={18} /> ปิด
+            </SheetButton>
+          }
+        >
+            <ReviewImage src={claimPost.imageUrl} images={getPostImages(claimPost)} alt={claimPost.title} onZoom={setClaimPostZoom} />
 
-            {claimPost.imageUrl && (
-              <img
-                src={claimPost.imageUrl}
-                alt=""
-                onClick={() => setClaimPostZoom(claimPost.imageUrl ?? null)}
-                style={{
-                  width: "100%", height: "180px", objectFit: "cover", borderRadius: "12px", marginBottom: "14px",
-                  border: "1px solid var(--border)", cursor: "pointer",
-                }}
-              />
-            )}
-
-            <div style={{ fontSize: "18px", fontWeight: 800, color: "var(--fg)", marginBottom: "4px" }}>
+          <div>
+            <div style={{ fontSize: "21px", fontWeight: 800, color: "var(--fg)", lineHeight: 1.3 }}>
               {claimPost.title}
             </div>
             <div style={{
-              fontSize: "10px", color: "var(--fg-faint)", marginBottom: "12px",
-              fontFamily: "'SF Mono', monospace",
+              fontSize: "11px", color: "var(--fg-faint)", marginTop: "5px",
+              fontFamily: "'SF Mono', monospace", wordBreak: "break-all",
             }}>
               ID: {claimPost.id}
             </div>
+          </div>
 
-            <div style={{ display: "flex", alignItems: "center", gap: "6px", margin: "0 2px 6px" }}>
-              <FileText size={13} color="var(--fg-accent)" />
-              <span style={{ fontSize: "12.5px", fontWeight: 700, color: "var(--fg-strong)" }}>รายละเอียด</span>
-            </div>
-            {claimPost.desc && (
+          {claimPost.desc && (
+            <div style={{
+              padding: "14px 16px", backgroundColor: "var(--bg-subtle)", borderRadius: "12px",
+              border: "1px solid var(--border)",
+            }}>
               <div style={{
-                padding: "12px", backgroundColor: "var(--bg-subtle)", borderRadius: "10px",
-                fontSize: "12px", color: "var(--fg-secondary)", lineHeight: 1.6, marginBottom: "12px",
-                border: "1px solid var(--border)",
+                fontSize: "12px", fontWeight: 700, color: "var(--fg-accent)",
+                marginBottom: "6px", display: "flex", alignItems: "center", gap: "6px",
+              }}>
+                <FileText size={14} /> รายละเอียด
+              </div>
+              <div style={{
+                fontSize: "14.5px", color: "var(--fg-secondary)", lineHeight: 1.75,
+                whiteSpace: "pre-wrap", wordBreak: "break-word",
               }}>
                 {claimPost.desc}
               </div>
-            )}
+            </div>
+          )}
 
-            {[
-              { icon: MapPin, label: "สถานที่", value: claimPost.locationName || "-" },
-              { icon: User, label: "ผู้แจ้ง", value: claimPost.reporterName || "-" },
-              { icon: Clock, label: "วันที่", value: formatDateShort(claimPost.date) || "-" },
-              { icon: Clock, label: "เวลาโพสต์", value: formatClockTime(claimPost.createdAt) || "-" },
-              { icon: MapPin, label: "สถานะ", value: (claimPost.status || "-") },
-            ].map((r, i) => (
-              <div key={i} style={{
-                display: "flex", alignItems: "center", gap: "8px",
-                padding: "8px 0", borderBottom: "1px solid var(--border)",
-              }}>
-                <r.icon size={14} color="var(--fg-faint)" />
-                <span style={{ fontSize: "11px", color: "var(--fg-faint)", width: "60px" }}>{r.label}</span>
-                <span style={{ fontSize: "12px", fontWeight: 600, color: "var(--fg-strong)" }}>{r.value}</span>
-              </div>
-            ))}
-          </div>
-        </div>
+          <InfoGrid>
+            <InfoRow icon={MapPin} label="สถานที่" value={claimPost.locationName || "-"} />
+            <InfoRow icon={User} label="ผู้แจ้ง" value={claimPost.reporterName || "-"} />
+            <InfoRow
+              icon={Clock}
+              label="วันที่ / เวลาโพสต์"
+              value={[
+                formatDateShort(claimPost.date),
+                formatClockTime(claimPost.createdAt),
+              ].filter(Boolean).join(" ") || "-"}
+            />
+            <InfoRow icon={MapPin} label="สถานะ" value={claimPost.status || "-"} />
+          </InfoGrid>
+        </ReviewSheet>
       )}
 
-      {/* Lightbox: ดูรูปโพสต์ใหญ่ */}
-      {claimPostZoom && (
-        <div
-          onClick={() => setClaimPostZoom(null)}
-          style={{
-            position: "fixed", inset: 0, backgroundColor: "rgba(5,4,10,0.85)",
-            backdropFilter: "blur(6px)",
-            zIndex: 120, display: "flex", alignItems: "center", justifyContent: "center",
-            padding: "20px", cursor: "pointer",
-          }}
-        >
-          <img
-            src={claimPostZoom}
-            alt=""
-            onClick={(e) => e.stopPropagation()}
-            style={{
-              maxWidth: "100%", maxHeight: "88vh", borderRadius: "16px",
-              boxShadow: "0 25px 60px rgba(0,0,0,0.7)", border: "1px solid var(--border)",
-              objectFit: "contain",
-            }}
-          />
-        </div>
-      )}
+        <ImageLightbox
+          src={claimPostZoom}
+          images={claimPost ? getPostImages(claimPost) : null}
+          onClose={() => setClaimPostZoom(null)}
+        />
 
 {confirmDialog && (
         <ConfirmModal
@@ -2035,6 +2391,12 @@ function AdminHistory({
   const [history, setHistory] = useState<AdminClaim[]>([]);
   const [searchText, setSearchText] = useState("");
   const [selected, setSelected] = useState<AdminClaim | null>(null);
+  const [selectedZoom, setSelectedZoom] = useState<string | null>(null);
+  // หลักฐานการส่งมอบของรายการที่เปิดดูอยู่ (โหลดเฉพาะรายการที่อนุมัติแล้ว)
+  const [selectedHandoverState, setSelectedHandover] = useState<{
+    claimId: string;
+    data: HandoverEvidence | null;
+  } | null>(null);
 
   useEffect(() => {
     // เจ้าหน้าที่ยังไม่มีจุด: ห้าม query ทั้งหมด (rules บังคับกรองจุด → deny เงียบ)
@@ -2051,6 +2413,24 @@ function AdminHistory({
     );
     return () => un();
   }, [isStaff, adminPoint]);
+
+  // โหลดหลักฐานการส่งมอบเมื่อเปิดดูประวัติรายการที่อนุมัติแล้ว
+  // รายการที่ปฏิเสธ/หมดอายุ/โพสต์ถูกลบ → ไม่มีหลักฐาน และไม่ต้องแสดงรูป
+  // เก็บผลผูกกับ claimId เพื่อแสดงเฉพาะตอนเปิดรายการเดียวกัน
+  const selectedHistoryId = selected?.id ?? null;
+  const selectedHistoryApproved = selected?.status === "approved";
+  useEffect(() => {
+    if (!selectedHistoryId || !selectedHistoryApproved) return;
+    let cancelled = false;
+    loadHandoverEvidence(selectedHistoryId).then((ev) => {
+      if (!cancelled) setSelectedHandover({ claimId: selectedHistoryId, data: ev });
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [selectedHistoryId, selectedHistoryApproved]);
+  const selectedHandover =
+    selectedHandoverState?.claimId === selectedHistoryId ? selectedHandoverState.data : null;
 
   const filtered = history.filter((c) => {
     if (c.status === "pending") return false;
@@ -2131,7 +2511,7 @@ function AdminHistory({
                       color: claim.claimType === "student" ? "var(--sc-info-fg)" : "var(--sc-warn-fg)",
                       border: `1px solid ${claim.claimType === "student" ? "var(--sc-info-border)" : "var(--sc-warn-border)"}`,
                     }}>
-                      {claim.claimType === "student" ? "นิสิต" : "บุคคลทั่วไป"}
+                      {claim.claimType === "student" ? "นิสิตและบุคลากร" : "บุคคลทั่วไป"}
                     </span>
                   </div>
                   <div style={{ fontSize: "11px", color: "var(--fg-secondary)", lineHeight: 1.6 }}>
@@ -2169,111 +2549,171 @@ function AdminHistory({
       )}
 
       {/* Detail Modal (อ่านอย่างเดียว) */}
-      {selected && (
-        <div style={{
-          position: "fixed", inset: 0, backgroundColor: "rgba(5,4,10,0.72)",
-          backdropFilter: "blur(6px)",
-          zIndex: 100, display: "flex", alignItems: "center", justifyContent: "center",
-          padding: "20px",
-        }}>
-          <div style={{
-            backgroundColor: "var(--bg-card)", borderRadius: "20px", padding: "22px",
-            width: "100%", maxWidth: "420px", maxHeight: "80vh", overflowY: "auto",
-            boxShadow: "0 25px 60px rgba(0,0,0,0.6)",
-            border: "1px solid var(--border)",
-          }}>
-            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "16px" }}>
-              <h3 style={{ fontSize: "16px", fontWeight: 800, color: "var(--fg)", margin: 0 }}>
-                รายละเอียดประวัติ
-              </h3>
-              <button onClick={() => setSelected(null)} style={{
-                background: "var(--bg-hover)", border: "none", borderRadius: "50%", width: "30px", height: "30px",
-                display: "flex", alignItems: "center", justifyContent: "center", cursor: "pointer", color: "var(--fg-secondary)",
-              }}>
-                <X size={16} />
-              </button>
-            </div>
+      <ReviewSheet
+        open={Boolean(selected)}
+        onClose={() => setSelected(null)}
+        title="รายละเอียดประวัติ"
+        subtitle={selected?.postTitle}
+        badge={selected ? getStatusBadge(selected) : undefined}
+        maxWidth={720}
+        footer={
+          <SheetButton onClick={() => setSelected(null)} full>
+            ปิด
+          </SheetButton>
+        }
+      >
+        {selected && (
+          <>
+            <ReviewImage src={selected.postImageUrl} alt="รูปโพสต์" onZoom={setSelectedZoom} />
 
-            {selected.postImageUrl && (
-              <img src={selected.postImageUrl} alt="" style={{
-                width: "100%", height: "180px", objectFit: "cover", borderRadius: "12px", marginBottom: "14px",
-                border: "1px solid var(--border)",
-              }} />
+            {/* รูปหลักฐานจากผู้ขอ — แสดงเฉพาะรายการที่อนุมัติเท่านั้น
+                (requirement: รายการที่ถูกปฏิเสธไม่ต้องแสดงรูปหลักฐาน) */}
+            {selected.status === "approved" && selected.evidenceUrl && (
+              <div style={{ display: "flex", flexDirection: "column", gap: "8px" }}>
+                <div style={{
+                  fontSize: "12px", fontWeight: 700, color: "var(--fg-muted)",
+                  display: "flex", alignItems: "center", gap: "6px",
+                }}>
+                  <ShieldCheck size={14} /> รูปหลักฐานที่ผู้ขอแนบ
+                </div>
+                <ReviewImage src={selected.evidenceUrl} alt="รูปหลักฐาน" onZoom={setSelectedZoom} />
+              </div>
             )}
 
-            <div style={{ fontSize: "18px", fontWeight: 800, color: "var(--fg)", marginBottom: "12px" }}>
+            {/* หลักฐานการส่งมอบ — รูปที่แอดมินถ่ายตอนกดอนุมัติ */}
+            {selected.status === "approved" && (
+              <div style={{ display: "flex", flexDirection: "column", gap: "8px" }}>
+                <div style={{
+                  fontSize: "12px", fontWeight: 700, color: "var(--sc-ok-fg)",
+                  display: "flex", alignItems: "center", gap: "6px",
+                }}>
+                  <Camera size={14} /> หลักฐานการส่งมอบ (ถ่ายโดยแอดมิน)
+                </div>
+                {selectedHandover?.photoUrl ? (
+                  <>
+                    <ReviewImage
+                      src={selectedHandover.photoUrl}
+                      alt="หลักฐานการส่งมอบ"
+                      onZoom={setSelectedZoom}
+                    />
+                    {selectedHandover.capturedAt && (
+                      <div style={{ fontSize: "11.5px", color: "var(--fg-muted)" }}>
+                        ถ่ายเมื่อ {formatTime(selectedHandover.capturedAt) || selectedHandover.capturedAt}
+                      </div>
+                    )}
+                  </>
+                ) : (
+                  <div style={{
+                    padding: "12px 14px", backgroundColor: "var(--sc-warn-bg)",
+                    border: "1px solid var(--sc-warn-border)", borderRadius: "12px",
+                    fontSize: "12.5px", color: "var(--sc-warn-fg)", lineHeight: 1.6,
+                    display: "flex", alignItems: "flex-start", gap: "8px",
+                  }}>
+                    <AlertTriangle size={16} style={{ flexShrink: 0, marginTop: "2px" }} />
+                    <span>ไม่พบรูปหลักฐานการส่งมอบ (อาจเป็นรายการที่อนุมัติก่อนมีระบบนี้)</span>
+                  </div>
+                )}
+              </div>
+            )}
+
+            <div style={{
+              fontSize: "21px",
+              fontWeight: 800,
+              color: "var(--fg)",
+              lineHeight: 1.35,
+              wordBreak: "break-word",
+            }}>
               {selected.postTitle}
             </div>
 
-            {[
-              { icon: User, label: "ผู้ขอรับของ", value: selected.claimantName || "-", color: "var(--sc-info-fg)", bg: "var(--sc-info-bg)" },
-              { icon: GraduationCap, label: "ประเภทผู้ขอ", value: selected.claimType === "student" ? "นิสิต" : "บุคคลทั่วไป", color: selected.claimType === "student" ? "var(--sc-info-fg)" : "var(--sc-warn-fg)", bg: selected.claimType === "student" ? "var(--sc-info-bg)" : "var(--sc-warn-bg)" },
-              { icon: Clock, label: "ยื่นคำขอเมื่อ", value: formatTime(selected.createdAt) || "-", color: "var(--sc-warn-fg)", bg: "var(--sc-warn-bg)" },
-              { icon: CheckCircle2, label: "สถานะ", value: getStatusBadge(selected).label, color: "var(--sc-ok-fg)", bg: "var(--sc-ok-bg)" },
-              { icon: Clock, label: "จบ (ส่งมอบ/ปิด) เมื่อ", value: resolveTime(selected.reviewedAt) ? formatTime(selected.reviewedAt) : "-", color: "var(--sc-brand-fg)", bg: "var(--sc-muted-bg)" },
-            ].map((row, i) => (
-              <div key={i} style={{
-                display: "flex", alignItems: "center", gap: "10px",
-                padding: "10px 12px", borderRadius: "10px", backgroundColor: row.bg,
-                marginBottom: "8px",
-              }}>
-                <row.icon size={16} color={row.color} />
-                <div>
-                  <div style={{ fontSize: "10px", color: "var(--fg-muted)", fontWeight: 600 }}>{row.label}</div>
-                  <div style={{ fontSize: "12px", fontWeight: 700, color: "var(--fg-strong)" }}>{row.value}</div>
-                </div>
-              </div>
-            ))}
+            <InfoGrid>
+              <InfoRow icon={User} label="ผู้ขอรับของ" value={selected.claimantName || "-"} color="var(--sc-info-fg)" />
+              <InfoRow
+                icon={GraduationCap}
+                label="ประเภทผู้ขอ"
+                value={selected.claimType === "student" ? "นิสิตและบุคลากร" : "บุคคลทั่วไป"}
+                color={selected.claimType === "student" ? "var(--sc-info-fg)" : "var(--sc-warn-fg)"}
+                bg={selected.claimType === "student" ? "var(--sc-info-bg)" : "var(--sc-warn-bg)"}
+              />
+              {selected.matchedPostId && (
+                <InfoRow
+                  icon={Link2}
+                  label="จับคู่กับโพสต์ของหายของผู้ขอ"
+                  value={selected.matchedPostTitle || selected.matchedPostId}
+                  color="var(--sc-ok-fg)"
+                  bg="var(--sc-ok-bg)"
+                />
+              )}
+              {selected.studentId && (
+                <InfoRow icon={IdCard} label="รหัสนิสิต" value={selected.studentId} color="var(--sc-info-fg)" bg="var(--sc-info-bg)" />
+              )}
+              {((selected.phone || selected.contact) && (selected.phone || selected.contact) !== "ไม่ระบุช่องทางติดต่อ") && (
+                <InfoRow icon={ShieldCheck} label="เบอร์โทร / ช่องทางติดต่อ" value={selected.phone || selected.contact} />
+              )}
+              {selected.email && (
+                <InfoRow icon={Mail} label="อีเมล" value={selected.email} />
+              )}
+              {selected.depositLocation && (
+                <InfoRow icon={MapPin} label="จุดฝาก / คืน" value={selected.depositLocation} />
+              )}
+              <InfoRow
+                icon={Clock}
+                label="ยื่นคำขอเมื่อ"
+                value={formatTime(selected.createdAt) || "-"}
+                color="var(--sc-warn-fg)"
+                bg="var(--sc-warn-bg)"
+              />
+              <InfoRow
+                icon={CheckCircle2}
+                label="จบ (ส่งมอบ/ปิด) เมื่อ"
+                value={resolveTime(selected.reviewedAt) ? formatTime(selected.reviewedAt) : "-"}
+                color="var(--sc-brand-fg)"
+                bg="var(--sc-muted-bg)"
+              />
+              {selected.pickupDate && (
+                <InfoRow icon={Clock} label="นัดรับของ" value={selected.pickupDate} />
+              )}
+              {selected.expiresAt && (
+                <InfoRow icon={Clock} label="หมดอายุคำขอ" value={selected.expiresAt} color="var(--sc-danger-fg)" bg="var(--sc-danger-bg)" />
+              )}
+              <InfoRow icon={IdCard} label="ID คำขอ" value={selected.id} />
+            </InfoGrid>
 
-            {selected.studentId && (
+            {selected.note && (
               <div style={{
-                display: "flex", alignItems: "center", gap: "10px",
-                padding: "10px 12px", borderRadius: "10px", backgroundColor: "var(--sc-info-bg)", marginBottom: "8px",
+                padding: "12px 14px",
+                background: "var(--sc-muted-bg)",
+                border: "1px solid var(--sc-muted-border)",
+                borderRadius: "12px",
+                fontSize: "14.5px",
+                lineHeight: 1.7,
+                color: "var(--fg-strong)",
+                wordBreak: "break-word",
               }}>
-                <IdCard size={16} color="var(--sc-info-fg)" />
-                <div>
-                  <div style={{ fontSize: "10px", color: "var(--fg-muted)", fontWeight: 600 }}>รหัสนิสิต</div>
-                  <div style={{ fontSize: "12px", fontWeight: 700, color: "var(--fg-strong)" }}>{selected.studentId}</div>
+                <div style={{ fontSize: "12px", fontWeight: 700, color: "var(--fg-muted)", marginBottom: "4px" }}>
+                  รายละเอียดจากผู้ขอ
                 </div>
-              </div>
-            )}
-
-            {((selected.phone || selected.contact) && (selected.phone || selected.contact) !== "ไม่ระบุช่องทางติดต่อ") && (
-              <div style={{
-                display: "flex", alignItems: "center", gap: "10px",
-                padding: "10px 12px", borderRadius: "10px", backgroundColor: "var(--bg-hover)", marginBottom: "8px",
-              }}>
-                <ShieldCheck size={16} color="var(--fg-accent)" />
-                <div>
-                  <div style={{ fontSize: "10px", color: "var(--fg-muted)", fontWeight: 600 }}>เบอร์โทร</div>
-                  <div style={{ fontSize: "12px", fontWeight: 700, color: "var(--fg-strong)" }}>{selected.phone || selected.contact}</div>
-                </div>
+                {selected.note}
               </div>
             )}
 
             {selected.status === "rejected" && selected.rejectReason && (
               <div style={{
-                padding: "12px", backgroundColor: "var(--sc-danger-bg)", borderRadius: "10px",
-                fontSize: "12px", color: "var(--sc-danger-fg-strong)", lineHeight: 1.6, marginBottom: "12px",
+                padding: "12px 14px", backgroundColor: "var(--sc-danger-bg)", borderRadius: "12px",
+                fontSize: "14.5px", color: "var(--sc-danger-fg-strong)", lineHeight: 1.7,
                 border: "1px solid var(--sc-danger-border)",
+                wordBreak: "break-word",
               }}>
-                <div style={{ fontSize: "11px", fontWeight: 700, color: "var(--sc-danger-fg)", marginBottom: "4px" }}>
+                <div style={{ fontSize: "12px", fontWeight: 700, color: "var(--sc-danger-fg)", marginBottom: "4px" }}>
                   เหตุผลการปิดคำขอ
                 </div>
                 {selected.rejectReason}
               </div>
             )}
-
-            <button onClick={() => setSelected(null)} style={{
-              width: "100%", padding: "11px", borderRadius: "10px",
-              border: "1px solid var(--border)", backgroundColor: "var(--bg-card)",
-              color: "var(--fg-secondary)", fontSize: "13px", fontWeight: 700, cursor: "pointer",
-            }}>
-              ปิด
-            </button>
-          </div>
-        </div>
-      )}
+          </>
+        )}
+      </ReviewSheet>
+      <ImageLightbox src={selectedZoom} onClose={() => setSelectedZoom(null)} />
     </div>
   );
 }
@@ -2393,16 +2833,6 @@ function AdminPosts({ posts }: { posts: PostItem[] }) {
     } catch (e) {
       console.error(e);
     }
-  };
-
-  const statusLabel = (p: PostItem) => {
-    if (p.status === "rejected") return { text: "ถูกปฏิเสธ", bg: "var(--sc-danger-bg)", color: "var(--sc-danger-fg)" };
-    if (p.status === "pending") return { text: "รอตรวจสอบ", bg: "var(--sc-warn-bg)", color: "var(--sc-warn-fg)" };
-    if (p.status === "suspended") return { text: "ระงับ", bg: "var(--sc-danger-bg)", color: "var(--sc-danger-fg)" };
-    if (p.status === "resolved") return { text: "คืนแล้ว", bg: "var(--sc-ok-bg)", color: "var(--sc-ok-fg)" };
-    if (p.status === "under_investigation") return { text: "อายัด", bg: "var(--sc-danger-bg)", color: "var(--sc-danger-fg)" };
-    if (p.status === "in_progress") return { text: "ดำเนินการ", bg: "var(--sc-info-bg)", color: "var(--sc-info-fg)" };
-    return { text: "ใช้งาน", bg: "var(--sc-ok-bg)", color: "var(--sc-ok-fg)" };
   };
 
   return (
@@ -2536,159 +2966,116 @@ function AdminPosts({ posts }: { posts: PostItem[] }) {
       )}
 
       {/* Post Detail Modal */}
-      {selectedPost && (
-        <div style={{
-          position: "fixed", inset: 0, backgroundColor: "rgba(5,4,10,0.72)",
-          backdropFilter: "blur(6px)",
-          zIndex: 100, display: "flex", alignItems: "center", justifyContent: "center",
-          padding: "20px",
-        }}>
-          <div style={{
-            backgroundColor: "var(--bg-card)", borderRadius: "20px", padding: "22px",
-            width: "100%", maxWidth: "420px", maxHeight: "80vh", overflowY: "auto",
-            boxShadow: "0 25px 60px rgba(0,0,0,0.6)",
-            border: "1px solid var(--border)",
-          }}>
-            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "14px" }}>
-              <h3 style={{ fontSize: "16px", fontWeight: 800, color: "var(--fg)", margin: 0 }}>รายละเอียดโพสต์</h3>
-              <button onClick={() => { setSelectedPost(null); setPostDetailZoom(null); }} style={{
-                background: "var(--bg-hover)", border: "none", borderRadius: "50%", width: "30px", height: "30px",
-                display: "flex", alignItems: "center", justifyContent: "center", cursor: "pointer", color: "var(--fg-secondary)",
-              }}>
-                <X size={16} />
-              </button>
-            </div>
-
-            {selectedPost.imageUrl && (
-              <img
-                src={selectedPost.imageUrl}
-                alt=""
-                onClick={() => setPostDetailZoom(selectedPost.imageUrl ?? null)}
-                style={{
-                  width: "100%", height: "180px", objectFit: "cover", borderRadius: "12px", marginBottom: "14px",
-                  border: "1px solid var(--border)", cursor: "pointer",
-                }}
-              />
+      <ReviewSheet
+        open={Boolean(selectedPost)}
+        onClose={() => { setSelectedPost(null); setPostDetailZoom(null); }}
+        title="รายละเอียดโพสต์"
+        subtitle={selectedPost?.title}
+        badge={selectedPost ? (() => {
+          const sl = statusLabel(selectedPost);
+          return { label: sl.text, bg: sl.bg, color: sl.color };
+        })() : undefined}
+        maxWidth={720}
+        footer={
+          <>
+            {selectedPost?.status === "under_investigation" && (
+              <SheetButton onClick={() => handleUnhold(selectedPost)} tone="ok" icon={ShieldCheck}>
+                ปลดอายัด
+              </SheetButton>
             )}
+            {selectedPost?.status === "suspended" && (
+              <SheetButton onClick={() => handleRestore(selectedPost)} tone="ok" icon={RefreshCw}>
+                กู้คืน
+              </SheetButton>
+            )}
+            {selectedPost && selectedPost.status !== "suspended" && (
+              <SheetButton onClick={() => handleSuspend(selectedPost)} tone="warn" icon={Ban}>
+                ระงับ
+              </SheetButton>
+            )}
+            {selectedPost && (
+              <SheetButton
+                onClick={() => handleDelete(selectedPost)}
+                tone="danger"
+                icon={Trash2}
+                disabled={deletingId === selectedPost.id}
+                full
+              >
+                {deletingId === selectedPost.id ? "กำลังลบ..." : "ลบโพสต์"}
+              </SheetButton>
+            )}
+            <SheetButton onClick={() => { setSelectedPost(null); setPostDetailZoom(null); }} full>
+              ปิด
+            </SheetButton>
+          </>
+        }
+      >
+        {selectedPost && (
+          <>
+            <ReviewImage
+              src={selectedPost.imageUrl}
+              images={getPostImages(selectedPost)}
+              alt="รูปโพสต์"
+              onZoom={(src) => setPostDetailZoom(src)}
+            />
 
-            <div style={{ fontSize: "18px", fontWeight: 800, color: "var(--fg)", marginBottom: "4px" }}>
-              {selectedPost.title}
-            </div>
             <div style={{
-              fontSize: "10px", color: "var(--fg-faint)", marginBottom: "12px",
+              fontSize: "12px",
+              color: "var(--fg-faint)",
               fontFamily: "'SF Mono', monospace",
+              wordBreak: "break-all",
             }}>
               ID: {selectedPost.id}
             </div>
 
-            <div style={{ display: "flex", alignItems: "center", gap: "6px", margin: "0 2px 6px" }}>
-              <FileText size={13} color="var(--fg-accent)" />
-              <span style={{ fontSize: "12.5px", fontWeight: 700, color: "var(--fg-strong)" }}>รายละเอียด</span>
-            </div>
             {selectedPost.desc && (
               <div style={{
-                padding: "12px", backgroundColor: "var(--bg-subtle)", borderRadius: "10px",
-                fontSize: "12px", color: "var(--fg-secondary)", lineHeight: 1.6, marginBottom: "12px",
+                padding: "14px 16px", backgroundColor: "var(--bg-subtle)", borderRadius: "12px",
                 border: "1px solid var(--border)",
               }}>
-                {selectedPost.desc}
+                <div style={{
+                  fontSize: "12px", fontWeight: 700, color: "var(--fg-accent)",
+                  marginBottom: "6px", display: "flex", alignItems: "center", gap: "6px",
+                }}>
+                  <FileText size={14} /> รายละเอียด
+                </div>
+                <div style={{
+                  fontSize: "14.5px",
+                  color: "var(--fg-secondary)",
+                  lineHeight: 1.75,
+                  whiteSpace: "pre-wrap",
+                  wordBreak: "break-word",
+                }}>
+                  {selectedPost.desc}
+                </div>
               </div>
             )}
 
-            {[
-              { icon: MapPin, label: "สถานที่", value: selectedPost.locationName || "-" },
-              ...(selectedPost.itemType === "found"
-                ? [{ icon: ShieldAlert, label: "จุดฝาก/คืน", value: selectedPost.depositLocation || "ไม่ระบุ" }]
-                : []),
-              { icon: User, label: "ผู้แจ้ง", value: selectedPost.reporterName || "-" },
-              { icon: Clock, label: "วันที่", value: formatDateShort(selectedPost.date) || "-" },
-              { icon: Clock, label: "เวลาโพสต์", value: formatClockTime(selectedPost.createdAt) || "-" },
-            ].map((r, i) => (
-              <div key={i} style={{
-                display: "flex", alignItems: "center", gap: "8px",
-                padding: "8px 0", borderBottom: "1px solid var(--border)",
-              }}>
-                <r.icon size={14} color={r.label === "จุดฝาก/คืน" ? "var(--sc-ok-fg)" : "var(--fg-faint)"} />
-                <span style={{ fontSize: "11px", color: "var(--fg-faint)", width: "60px" }}>{r.label}</span>
-                <span style={{
-                  fontSize: "12px", fontWeight: 600,
-                  color: r.label === "จุดฝาก/คืน" ? "var(--sc-ok-fg)" : "var(--fg-strong)",
-                }}>{r.value}</span>
-              </div>
-            ))}
-
-            <div style={{ display: "flex", gap: "8px", marginTop: "16px", flexWrap: "wrap" }}>
-              <div style={{ display: "flex", gap: "8px", width: "100%" }}>
-              {selectedPost.status === "under_investigation" && (
-                <button onClick={() => handleUnhold(selectedPost)} style={{
-                  flex: 1, padding: "10px", borderRadius: "10px", border: "1px solid var(--sc-ok-border)",
-                  backgroundColor: "var(--sc-ok-bg)", color: "var(--sc-ok-fg)", fontSize: "12px", fontWeight: 700,
-                  cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", gap: "5px",
-                }}>
-                  <ShieldCheck size={14} /> ปลดอายัด
-                </button>
+            <InfoGrid>
+              <InfoRow icon={MapPin} label="สถานที่" value={selectedPost.locationName || "-"} />
+              {selectedPost.itemType === "found" && (
+                <InfoRow
+                  icon={ShieldAlert}
+                  label="จุดฝาก/คืน"
+                  value={selectedPost.depositLocation || "ไม่ระบุ"}
+                  color="var(--sc-ok-fg)"
+                  bg="var(--sc-ok-bg)"
+                />
               )}
-              {selectedPost.status !== "suspended" && (
-                <button onClick={() => handleSuspend(selectedPost)} style={{
-                  flex: 1, padding: "10px", borderRadius: "10px", border: "1px solid var(--sc-warn-border)",
-                  backgroundColor: "var(--sc-warn-bg)", color: "var(--sc-warn-fg)", fontSize: "12px", fontWeight: 700,
-                  cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", gap: "5px",
-                }}>
-                  <Ban size={14} /> ระงับ
-                </button>
-              )}
-              {selectedPost.status === "suspended" && (
-                <button onClick={() => handleRestore(selectedPost)} style={{
-                  flex: 1, padding: "10px", borderRadius: "10px", border: "1px solid var(--sc-ok-border)",
-                  backgroundColor: "var(--sc-ok-bg)", color: "var(--sc-ok-fg)", fontSize: "12px", fontWeight: 700,
-                  cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", gap: "5px",
-                }}>
-                  <RefreshCw size={14} /> กู้คืน
-                </button>
-              )}
-              <button onClick={() => handleDelete(selectedPost)} disabled={deletingId === selectedPost.id} style={{
-                flex: 1, padding: "10px", borderRadius: "10px", border: "1px solid var(--sc-danger-border)",
-                backgroundColor: "var(--sc-danger-bg)", color: "var(--sc-danger-fg)", fontSize: "12px", fontWeight: 700,
-                cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", gap: "5px",
-              }}>
-                <Trash2 size={14} /> {deletingId === selectedPost.id ? "กำลังลบ..." : "ลบโพสต์"}
-              </button>
-              </div>
-              <button onClick={() => { setSelectedPost(null); setPostDetailZoom(null); }} style={{
-                width: "100%", padding: "10px", borderRadius: "10px",
-                border: "1px solid var(--border)", backgroundColor: "var(--bg-card)",
-                color: "var(--fg-secondary)", fontSize: "12px", fontWeight: 700, cursor: "pointer", marginTop: "4px",
-              }}>
-                ปิด
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
+              <InfoRow icon={User} label="ผู้แจ้ง" value={selectedPost.reporterName || "-"} />
+              <InfoRow icon={Clock} label="วันที่" value={formatDateShort(selectedPost.date) || "-"} />
+              <InfoRow icon={Clock} label="เวลาโพสต์" value={formatClockTime(selectedPost.createdAt) || "-"} />
+            </InfoGrid>
+          </>
+        )}
+      </ReviewSheet>
 
       {/* Lightbox: ดูรูปโพสต์ใหญ่ */}
-      {postDetailZoom && (
-        <div
-          onClick={() => setPostDetailZoom(null)}
-          style={{
-            position: "fixed", inset: 0, backgroundColor: "rgba(5,4,10,0.85)",
-            backdropFilter: "blur(6px)",
-            zIndex: 120, display: "flex", alignItems: "center", justifyContent: "center",
-            padding: "20px", cursor: "pointer",
-          }}
-        >
-          <img
-            src={postDetailZoom}
-            alt=""
-            onClick={(e) => e.stopPropagation()}
-            style={{
-              maxWidth: "100%", maxHeight: "88vh", borderRadius: "16px",
-              boxShadow: "0 25px 60px rgba(0,0,0,0.7)", border: "1px solid var(--border)",
-              objectFit: "contain",
-            }}
-          />
-        </div>
-      )}
+        <ImageLightbox
+          src={postDetailZoom}
+          images={selectedPost ? getPostImages(selectedPost) : null}
+          onClose={() => setPostDetailZoom(null)}
+        />
 
       {confirmDialog && (
         <ConfirmModal
@@ -2717,6 +3104,8 @@ function AdminReports() {
   const [filterTab, setFilterTab] = useState<"open" | "closed">("open");
   const [selectedReport, setSelectedReport] = useState<AdminReport | null>(null);
   const [reportPost, setReportPost] = useState<PostItem | null>(null);
+  const [reportPreview, setReportPreview] = useState<PostItem | null>(null);
+  const [reportZoom, setReportZoom] = useState<string | null>(null);
   const [replyText, setReplyText] = useState("");
   const [confirmDialog, setConfirmDialog] = useState<{
     title: string;
@@ -2771,27 +3160,50 @@ function AdminReports() {
     return () => unsub();
   }, []);
 
-  // ดึงโพสต์ที่ถูกรายงานขึ้น preview เมื่อเปิด modal
+  // โหลดรูปเล็กของโพสต์ที่ถูกรายงาน เพื่อแสดง thumbnail ในกรอบรายงาน (ไม่เปิดกรอบเต็ม)
   useEffect(() => {
-    if (!selectedReport?.postId) return;
+    const postId = selectedReport?.postId;
+    if (!postId) return;
     let cancelled = false;
     (async () => {
       try {
-        const snap = await getDoc(doc(db, "posts", selectedReport.postId as string));
+        const snap = await getDoc(doc(db, "posts", postId));
         if (cancelled) return;
-        setReportPost(
-          snap.exists() ? ({ id: snap.id, ...snap.data() } as PostItem) : null
-        );
+        if (!snap.exists()) return;
+        setReportPreview({ id: snap.id, ...snap.data() } as PostItem);
       } catch (e) {
-        console.error("Error loading reported post:", e);
-        if (!cancelled) setReportPost(null);
+        console.error("Error fetching reported post preview:", e);
       }
     })();
-    return () => {
-      cancelled = true;
-    };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [selectedReport?.id]);
+    return () => { cancelled = true; };
+  }, [selectedReport?.postId]);
+
+  // thumbnail ใช้ได้เฉพาะเมื่อเป็นโพสต์ของรายงานที่เลือกอยู่จริง
+  const reportPreviewPost =
+    reportPreview && reportPreview.id === selectedReport?.postId ? reportPreview : null;
+  const reportCover = reportPreviewPost ? getPostCover(reportPreviewPost) : null;
+
+  // เปิดกรอบรายละเอียดโพสต์ที่ถูกรายงาน (กดจากปุ่ม "ตรวจสอบรายละเอียดโพสต์ฉบับเต็ม")
+  const openReportPost = async (report: AdminReport) => {
+    if (!report.postId) {
+      showToast("ไม่พบโพสต์ที่เกี่ยวข้องกับรายงานนี้", "info");
+      return;
+    }
+    try {
+      const snap = await getDoc(doc(db, "posts", report.postId));
+      if (snap.exists()) {
+        setReportPost({ id: snap.id, ...snap.data() } as PostItem);
+        setReportZoom(null);
+      } else {
+        setReportPost(null);
+        setReportZoom(null);
+        showToast("ไม่พบโพสต์นี้ (อาจถูกลบไปแล้ว)", "error");
+      }
+    } catch (e) {
+      console.error("Error fetching reported post:", e);
+      showToast("ไม่สามารถดึงข้อมูลโพสต์ได้", "error");
+    }
+  };
 
   const openCount = reports.filter((r) => r.status === "open").length;
   const resolvedCount = reports.filter((r) => r.status !== "open").length;
@@ -3004,7 +3416,7 @@ function AdminReports() {
     });
   };
 
-  const statusBadge = (status?: string) => {
+  const reportStatusMeta = (status?: string) => {
     const map: Record<string, { label: string; color: string; bg: string }> = {
       open: { label: "เปิด", color: "var(--sc-warn-fg)", bg: "var(--sc-warn-bg)" },
       dismissed: { label: "ปิดแล้ว", color: "#6b7280", bg: "#1f1f2f" },
@@ -3012,12 +3424,17 @@ function AdminReports() {
       reporter_banned: { label: "แบนผู้รายงาน", color: "#ef4444", bg: "var(--sc-danger-bg)" },
       post_suspended: { label: "ระงับโพสต์แล้ว", color: "var(--sc-danger-fg)", bg: "var(--sc-danger-bg)" },
       post_held: { label: "อายัดชั่วคราว", color: "var(--sc-warn-fg)", bg: "var(--sc-warn-bg)" },
+      closed: { label: "ปิดแล้ว (ตอบผู้ใช้แล้ว)", color: "#6b7280", bg: "#1f1f2f" },
     };
-    const s = map[status || "open"] || map.open;
+    return map[status || "open"] || map.open;
+  };
+
+  const statusBadge = (status?: string) => {
+    const s = reportStatusMeta(status);
     return (
       <span style={{
         display: "inline-flex", alignItems: "center", gap: 4, padding: "2px 8px",
-        borderRadius: 6, fontSize: 10.5, fontWeight: 700, color: s.color, backgroundColor: s.bg,
+        borderRadius: 6, fontSize: 12, fontWeight: 700, color: s.color, backgroundColor: s.bg,
       }}>
         {s.label}
       </span>
@@ -3096,6 +3513,7 @@ function AdminReports() {
             key={report.id}
             onClick={() => {
               setReportPost(null);
+              setReportZoom(null);
               setSelectedReport(report);
             }}
             style={{
@@ -3133,7 +3551,7 @@ function AdminReports() {
               <div style={{ marginTop: 4, display: "flex", gap: 6, flexWrap: "wrap" }}>
                 <span style={{
                   display: "inline-flex", alignItems: "center", gap: 4, padding: "2px 8px",
-                  borderRadius: 6, fontSize: 10.5, fontWeight: 700,
+                  borderRadius: 6, fontSize: 12, fontWeight: 700,
                   color: km.color, backgroundColor: km.bg,
                 }}>
                   {km.label}
@@ -3152,245 +3570,317 @@ function AdminReports() {
       )}
 
       {/* Report Detail Modal */}
-      {selectedReport && (
-        <div style={{
-          position: "fixed", top: 0, left: 0, right: 0, bottom: 0,
-          backgroundColor: "rgba(0,0,0,0.6)", display: "flex",
-          alignItems: "center", justifyContent: "center", zIndex: 5000, padding: "20px",
-        }} onClick={() => setSelectedReport(null)}>
-          <div style={{
-            width: "100%", maxWidth: "420px", backgroundColor: "var(--bg-card)",
-            borderRadius: "16px", border: "1px solid var(--border)",
-            boxShadow: "0 24px 60px rgba(0,0,0,0.5)", padding: 0, overflow: "hidden",
-          }} onClick={(e) => e.stopPropagation()}>
-            <div style={{
-              padding: "16px", borderBottom: "1px solid var(--border)",
-              display: "flex", alignItems: "center", gap: "10px",
-            }}>
-              <div style={{
-                width: "36px", height: "36px", borderRadius: "10px", flexShrink: 0,
-                backgroundColor: "var(--sc-danger-bg)", display: "flex",
-                alignItems: "center", justifyContent: "center",
+      <ReviewSheet
+        open={Boolean(selectedReport)}
+        onClose={() => setSelectedReport(null)}
+        title="รายละเอียดรายงาน"
+        subtitle={selectedReport ? formatDateShort(selectedReport.createdAt) : undefined}
+        badge={selectedReport ? (() => {
+          const s = reportStatusMeta(selectedReport.status);
+          return { label: s.label, bg: s.bg, color: s.color };
+        })() : undefined}
+        zIndex={5000}
+        maxWidth={720}
+        footer={
+          <>
+            {selectedReport?.status === "open" && (
+              <>
+                <SheetButton onClick={() => handleDismiss(selectedReport)} icon={CheckCircle2}>
+                  ปิดรายงาน (ไม่พบปัญหา)
+                </SheetButton>
+                {selectedReport.postId && kind === "post_report" && (
+                  <SheetButton onClick={() => handleSuspendPost(selectedReport)} tone="warn" icon={Ban}>
+                    ระงับชั่วคราว
+                  </SheetButton>
+                )}
+                {selectedReport.postId && kind === "claim_dispute" && reportPost?.status !== "under_investigation" && (
+                  <SheetButton onClick={() => handleHoldPost(selectedReport, true)} tone="warn" icon={ShieldAlert}>
+                    อายัดชั่วคราว
+                  </SheetButton>
+                )}
+                {selectedReport.postId && kind === "claim_dispute" && reportPost?.status === "under_investigation" && (
+                  <SheetButton onClick={() => handleHoldPost(selectedReport, false)} tone="ok" icon={ShieldCheck}>
+                    ปลดอายัด
+                  </SheetButton>
+                )}
+                {selectedReport.postId && (
+                  <SheetButton onClick={() => handleDeletePost(selectedReport)} tone="danger" icon={Trash2}>
+                    ลบโพสต์
+                  </SheetButton>
+                )}
+                <SheetButton onClick={() => handleBanReporter(selectedReport)} tone="danger" icon={Ban} full>
+                  แบนผู้ใช้
+                </SheetButton>
+              </>
+            )}
+            <SheetButton onClick={() => setSelectedReport(null)} full>ปิด</SheetButton>
+          </>
+        }
+      >
+        {selectedReport && (
+          <>
+            <div style={{ display: "flex", gap: "8px", flexWrap: "wrap" }}>
+              <span style={{
+                display: "inline-flex", alignItems: "center", gap: 4, padding: "4px 10px",
+                borderRadius: 8, fontSize: 12.5, fontWeight: 700,
+                color: kindMeta.color, backgroundColor: kindMeta.bg,
               }}>
-                <Flag size={16} color="var(--sc-danger-fg)" />
-              </div>
-              <div style={{ flex: 1, minWidth: 0 }}>
-                <div style={{ fontSize: "13px", fontWeight: 800, color: "var(--fg)" }}>
-                  รายละเอียดรายงาน
-                </div>
-                <div style={{ fontSize: "11px", color: "var(--fg-muted)" }}>
-                  {formatDateShort(selectedReport.createdAt)}
-                </div>
-              </div>
-              {statusBadge(selectedReport.status)}
-              <button onClick={() => setSelectedReport(null)} style={{
-                width: "30px", height: "30px", borderRadius: "8px", flexShrink: 0,
-                border: "1px solid var(--border)", backgroundColor: "var(--bg-card)",
-                display: "flex", alignItems: "center", justifyContent: "center",
-                cursor: "pointer", color: "var(--fg-muted)",
-              }}>
-                <X size={14} />
-              </button>
+                {kindMeta.label}
+              </span>
             </div>
-            <div style={{ padding: "16px", display: "flex", flexDirection: "column", gap: "12px" }}>
-              <div style={{ display: "flex", gap: 6 }}>
-                <span style={{
-                  display: "inline-flex", alignItems: "center", gap: 4, padding: "2px 8px",
-                  borderRadius: 6, fontSize: 10.5, fontWeight: 700,
-                  color: kindMeta.color, backgroundColor: kindMeta.bg,
-                }}>
-                  {kindMeta.label}
-                </span>
-              </div>
-              {selectedReport.postId ? (
-                <div>
-                  <div style={{ fontSize: "11px", color: "var(--fg-muted)", fontWeight: 600, marginBottom: 4 }}>โพสต์ที่ถูกรายงาน</div>
-                  {reportPost ? (
-                    <div style={{
-                      display: "flex", alignItems: "center", gap: "10px", padding: "10px",
-                      borderRadius: "10px", backgroundColor: "var(--bg-hover)",
-                      border: "1px solid var(--border)",
-                    }}>
-                      {reportPost.imageUrl && (
-                        <img src={reportPost.imageUrl} alt="" style={{
-                          width: "44px", height: "44px", borderRadius: "8px",
-                          objectFit: "cover", flexShrink: 0,
-                        }} />
-                      )}
-                      <div style={{ flex: 1, minWidth: 0 }}>
-                        <div style={{
-                          fontSize: "12.5px", fontWeight: 700, color: "var(--fg)",
-                          whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis",
-                        }}>{reportPost.title}</div>
-                        <div style={{ fontSize: "11px", color: "var(--fg-secondary)", marginTop: 2 }}>
-                          {reportPost.itemType === "lost" ? "ของหาย" : "พบของ"} · {reportPost.locationName || "ไม่ระบุสถานที่"}
-                        </div>
-                        <div style={{ fontSize: "10.5px", color: "var(--fg-faint)", marginTop: 2 }}>ID: {reportPost.id}</div>
-                      </div>
-                      <span style={{
-                        display: "inline-flex", alignItems: "center", gap: 4, padding: "2px 8px",
-                        borderRadius: 6, fontSize: 10.5, fontWeight: 700, flexShrink: 0,
-                        color: reportPost.status === "under_investigation" ? "var(--sc-warn-fg)"
-                          : reportPost.status === "resolved" ? "var(--sc-ok-fg)"
-                          : reportPost.status === "suspended" ? "var(--sc-danger-fg)"
-                          : reportPost.status === "in_progress" ? "var(--sc-info-fg)" : "var(--sc-ok-fg)",
-                        backgroundColor: reportPost.status === "under_investigation" ? "var(--sc-warn-bg)"
-                          : reportPost.status === "resolved" ? "var(--sc-ok-bg)"
-                          : reportPost.status === "suspended" ? "var(--sc-danger-bg)"
-                          : reportPost.status === "in_progress" ? "var(--sc-info-bg)" : "var(--sc-ok-bg)",
-                      }}>
-                        {reportPost.status === "under_investigation" ? "อายัด"
-                          : reportPost.status === "resolved" ? "คืนแล้ว"
-                          : reportPost.status === "suspended" ? "ระงับ"
-                          : reportPost.status === "in_progress" ? "ดำเนินการ" : "ใช้งาน"}
-                      </span>
-                    </div>
-                  ) : (
-                    <div style={{
-                      fontSize: "12px", color: "var(--fg-muted)", padding: "10px",
-                      borderRadius: "10px", backgroundColor: "var(--bg-hover)",
-                      border: "1px dashed var(--border)",
-                    }}>
-                      โพสต์นี้ถูกลบไปแล้ว หรือไม่พบในระบบ
-                    </div>
-                  )}
-                </div>
-              ) : (
-                <div>
-                  <div style={{ fontSize: "11px", color: "var(--fg-muted)", fontWeight: 600, marginBottom: 2 }}>หัวข้อ</div>
-                  <div style={{ fontSize: "13px", fontWeight: 700, color: "var(--fg)" }}>{selectedReport.category || "-"}</div>
-                </div>
-              )}
-              <div style={{ display: "flex", gap: "12px" }}>
-                <div style={{ flex: 1 }}>
-                  <div style={{ fontSize: "11px", color: "var(--fg-muted)", fontWeight: 600, marginBottom: 2 }}>ผู้รายงาน</div>
-                  <div style={{ fontSize: "12.5px", fontWeight: 600, color: "var(--fg)" }}>{selectedReport.reporterName || "-"}</div>
-                </div>
-                <div style={{ flex: 1 }}>
-                  <div style={{ fontSize: "11px", color: "var(--fg-muted)", fontWeight: 600, marginBottom: 2 }}>หมวดหมู่</div>
-                  <div style={{ fontSize: "12.5px", fontWeight: 600, color: "var(--sc-danger-fg)" }}>{selectedReport.category || "-"}</div>
-                </div>
-              </div>
-<div>
-                  <div style={{ fontSize: "11px", color: "var(--fg-muted)", fontWeight: 600, marginBottom: 2 }}>รายละเอียด</div>
-                  <div style={{
-                    fontSize: "12.5px", color: "var(--fg-secondary)", lineHeight: 1.5,
-                    padding: "10px", borderRadius: "10px", backgroundColor: "var(--bg-hover)",
-                    border: "1px solid var(--border)",
-                  }}>
-                    {selectedReport.detail || "ไม่มีรายละเอียด"}
-                  </div>
-                </div>
 
-                {(selectedReport.reporterId || selectedReport.userId) && (
-                  <div style={{
-                    display: "flex", flexDirection: "column", gap: "6px",
-                    padding: "10px", borderRadius: "10px",
-                    backgroundColor: "var(--sc-ok-bg)", border: "1px solid var(--sc-ok-border)",
-                  }}>
-                    <div style={{ fontSize: "11px", color: "var(--sc-ok-fg)", fontWeight: 700, display: "flex", alignItems: "center", gap: 5 }}>
-                      <Reply size={12} /> ตอบกลับผู้ใช้
-                    </div>
-                    <textarea
-                      value={replyText}
-                      onChange={(e) => setReplyText(e.target.value)}
-                      rows={2}
-                      placeholder="พิมพ์ข้อความตอบกลับ (เช่น แจ้งผลการตรวจสอบ สอบถามข้อมูลเพิ่มเติม)..."
+            {selectedReport.postId ? (
+              <>
+                {/* รูปเล็ก + ข้อมูลโพสต์ที่ถูกรายงาน */}
+                <div style={{
+                  display: "flex", alignItems: "flex-start", gap: "12px",
+                  padding: "12px 14px", borderRadius: "12px",
+                  backgroundColor: "var(--bg-subtle)", border: "1px solid var(--border)",
+                }}>
+                  {reportCover ? (
+                    <img
+                      src={reportCover}
+                      alt=""
                       style={{
-                        width: "100%", borderRadius: "8px", padding: "8px 10px",
-                        border: "1px solid var(--border)", background: "var(--bg-card)",
-                        color: "var(--fg)", fontSize: "12px", resize: "vertical", outline: "none", fontFamily: "inherit",
+                        width: "72px", height: "72px", borderRadius: "10px",
+                        objectFit: "cover", flexShrink: 0,
+                        border: "1px solid var(--border)",
                       }}
                     />
-                    <button
-                      onClick={handleReply}
-                      disabled={!replyText.trim()}
-                      style={{
-                        padding: "8px", borderRadius: "8px",
-                        border: "none", background: "#1aa05f", color: "#ffffff",
-                        fontSize: "12px", fontWeight: 700, cursor: replyText.trim() ? "pointer" : "not-allowed",
-                        display: "flex", alignItems: "center", justifyContent: "center", gap: "5px",
-                        opacity: replyText.trim() ? 1 : 0.5,
-                      }}
-                    >
-                      <Send size={13} /> ส่งคำตอบกลับไปยังผู้ใช้
-                    </button>
-                  </div>
-                )}
-
-              {selectedReport.status === "open" && (
-                <div style={{ display: "flex", flexDirection: "column", gap: "8px", marginTop: "4px" }}>
-                  <button onClick={() => handleDismiss(selectedReport)} style={{
-                    width: "100%", padding: "10px", borderRadius: "10px",
-                    border: "1px solid var(--border)", backgroundColor: "var(--bg-card)",
-                    color: "var(--fg-secondary)", fontSize: "12px", fontWeight: 700,
-                    cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", gap: "5px",
-                  }}>
-                    <CheckCircle2 size={14} /> ปิดรายงาน (ไม่พบปัญหา)
-                  </button>
-                  {selectedReport.postId && (
-                    <div style={{ display: "flex", gap: "8px" }}>
-                      {kind === "post_report" && (
-                        <button onClick={() => handleSuspendPost(selectedReport)} style={{
-                          flex: 1, padding: "10px", borderRadius: "10px",
-                          border: "1px solid var(--sc-warn-border)", backgroundColor: "var(--sc-warn-bg)",
-                          color: "var(--sc-warn-fg)", fontSize: "12px", fontWeight: 700,
-                          cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", gap: "5px",
-                        }}>
-                          <Ban size={14} /> ระงับชั่วคราว
-                        </button>
-                      )}
-                      {kind === "claim_dispute" && reportPost?.status !== "under_investigation" && (
-                        <button onClick={() => handleHoldPost(selectedReport, true)} style={{
-                          flex: 1, padding: "10px", borderRadius: "10px",
-                          border: "1px solid var(--sc-warn-border)", backgroundColor: "var(--sc-warn-bg)",
-                          color: "var(--sc-warn-fg)", fontSize: "12px", fontWeight: 700,
-                          cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", gap: "5px",
-                        }}>
-                          <ShieldAlert size={14} /> อายัดชั่วคราว
-                        </button>
-                      )}
-                      {kind === "claim_dispute" && reportPost?.status === "under_investigation" && (
-                        <button onClick={() => handleHoldPost(selectedReport, false)} style={{
-                          flex: 1, padding: "10px", borderRadius: "10px",
-                          border: "1px solid var(--sc-ok-border)", backgroundColor: "var(--sc-ok-bg)",
-                          color: "var(--sc-ok-fg)", fontSize: "12px", fontWeight: 700,
-                          cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", gap: "5px",
-                        }}>
-                          <ShieldCheck size={14} /> ปลดอายัด
-                        </button>
-                      )}
-                      <button onClick={() => handleDeletePost(selectedReport)} style={{
-                        flex: 1, padding: "10px", borderRadius: "10px",
-                        border: "1px solid var(--sc-danger-border)", backgroundColor: "var(--sc-danger-bg)",
-                        color: "var(--sc-danger-fg)", fontSize: "12px", fontWeight: 700,
-                        cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", gap: "5px",
-                      }}>
-                        <Trash2 size={14} /> ลบโพสต์
-                      </button>
+                  ) : (
+                    <div style={{
+                      width: "72px", height: "72px", borderRadius: "10px", flexShrink: 0,
+                      display: "flex", alignItems: "center", justifyContent: "center",
+                      backgroundColor: "var(--bg-hover)", border: "1px solid var(--border)",
+                    }}>
+                      <FileText size={20} color="var(--fg-faint)" />
                     </div>
                   )}
-                  <button onClick={() => handleBanReporter(selectedReport)} style={{
-                    width: "100%", padding: "10px", borderRadius: "10px",
-                    border: "1px solid var(--sc-danger-border)", backgroundColor: "var(--sc-danger-bg)",
-                    color: "#ef4444", fontSize: "12px", fontWeight: 700,
-                    cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", gap: "5px",
-                  }}>
-                    <Ban size={14} /> แบนผู้ใช้
-                  </button>
+                  <div style={{ minWidth: 0 }}>
+                    <div style={{ fontSize: "12px", fontWeight: 600, color: "var(--fg-muted)" }}>
+                      โพสต์ที่ถูกรายงาน
+                    </div>
+                    <div style={{
+                      fontSize: "14.5px", fontWeight: 700, color: "var(--fg-strong)",
+                      lineHeight: 1.5, wordBreak: "break-word", marginTop: 2,
+                    }}>
+                      {selectedReport.postTitle || reportPreviewPost?.title || "-"}
+                    </div>
+                    <div style={{
+                      fontSize: "12.5px", fontWeight: 600, color: "var(--fg-secondary)",
+                      marginTop: "4px", lineHeight: 1.5,
+                    }}>
+                      {reportPreviewPost?.itemType === "found"
+                        ? "พบของ"
+                        : reportPreviewPost?.itemType === "lost"
+                          ? "ของหาย"
+                          : selectedReport.postType === "lost" ? "ของหาย" : "พบของ"}
+                    </div>
+                    <div style={{
+                      fontSize: "12px", color: "var(--fg-faint)", marginTop: "4px",
+                      fontFamily: "'SF Mono', monospace", wordBreak: "break-all",
+                    }}>
+                      ID: {selectedReport.postId}
+                    </div>
+                  </div>
                 </div>
-              )}
 
-              <button onClick={() => setSelectedReport(null)} style={{
-                width: "100%", padding: "10px", borderRadius: "10px",
-                border: "1px solid var(--border)", backgroundColor: "var(--bg-card)",
-                color: "var(--fg-secondary)", fontSize: "12px", fontWeight: 700, cursor: "pointer", marginTop: "4px",
+                <SheetButton
+                  tone="neutral"
+                  onClick={() => openReportPost(selectedReport)}
+                >
+                  <Eye size={18} /> ตรวจสอบรายละเอียดโพสต์ฉบับเต็ม
+                </SheetButton>
+              </>
+            ) : (
+              <InfoRow
+                icon={Flag}
+                label="หัวข้อ"
+                value={selectedReport.category || "-"}
+              />
+            )}
+
+            <InfoGrid>
+              <InfoRow icon={User} label="ผู้รายงาน" value={selectedReport.reporterName || "-"} />
+              <InfoRow
+                icon={Flag}
+                label="หมวดหมู่"
+                value={selectedReport.category || "-"}
+                color="var(--sc-danger-fg)"
+                bg="var(--sc-danger-bg)"
+              />
+            </InfoGrid>
+
+            <div>
+              <div style={{ fontSize: "12px", color: "var(--fg-muted)", fontWeight: 600, marginBottom: "6px" }}>
+                รายละเอียด
+              </div>
+              <div style={{
+                fontSize: "15px", color: "var(--fg-secondary)", lineHeight: 1.75,
+                padding: "12px 14px", borderRadius: "12px", backgroundColor: "var(--bg-hover)",
+                border: "1px solid var(--border)", whiteSpace: "pre-wrap", wordBreak: "break-word",
               }}>
-                ปิด
-              </button>
+                {selectedReport.detail || "ไม่มีรายละเอียด"}
+              </div>
             </div>
+
+            {(selectedReport.reporterId || selectedReport.userId) && (
+              <div style={{
+                display: "flex", flexDirection: "column", gap: "8px",
+                padding: "12px", borderRadius: "12px",
+                backgroundColor: "var(--sc-ok-bg)", border: "1px solid var(--sc-ok-border)",
+              }}>
+                <div style={{ fontSize: "12.5px", color: "var(--sc-ok-fg)", fontWeight: 700, display: "flex", alignItems: "center", gap: 6 }}>
+                  <Reply size={14} /> ตอบกลับผู้ใช้
+                </div>
+                <textarea
+                  value={replyText}
+                  onChange={(e) => setReplyText(e.target.value)}
+                  rows={3}
+                  placeholder="พิมพ์ข้อความตอบกลับ (เช่น แจ้งผลการตรวจสอบ สอบถามข้อมูลเพิ่มเติม)..."
+                  style={{
+                    width: "100%", boxSizing: "border-box", borderRadius: "10px", padding: "10px 12px",
+                    border: "1px solid var(--border)", background: "var(--bg-card)",
+                    color: "var(--fg)", fontSize: "14px", lineHeight: 1.6,
+                    resize: "vertical", outline: "none", fontFamily: "inherit",
+                  }}
+                />
+                <button
+                  onClick={handleReply}
+                  disabled={!replyText.trim()}
+                  style={{
+                    minHeight: "48px", padding: "0 16px", borderRadius: "12px",
+                    border: "none", background: "#1aa05f", color: "#ffffff",
+                    fontSize: "14.5px", fontWeight: 700, cursor: replyText.trim() ? "pointer" : "not-allowed",
+                    display: "flex", alignItems: "center", justifyContent: "center", gap: "8px",
+                    opacity: replyText.trim() ? 1 : 0.5,
+                  }}
+                >
+                  <Send size={16} /> ส่งคำตอบกลับไปยังผู้ใช้
+                </button>
+              </div>
+            )}
+          </>
+        )}
+      </ReviewSheet>
+
+      {/* กรอบรายละเอียดโพสต์ที่ถูกรายงาน (เปิดจากปุ่ม "ตรวจสอบรายละเอียดโพสต์ฉบับเต็ม") */}
+      {reportPost && (
+        <ReviewSheet
+          open
+          onClose={() => { setReportPost(null); setReportZoom(null); }}
+          title="รายละเอียดโพสต์ที่ถูกรายงาน"
+          subtitle={reportPost.title}
+          badge={(() => {
+            const sl = statusLabel(reportPost);
+            return { label: sl.text, bg: sl.bg, color: sl.color };
+          })()}
+          zIndex={5010}
+          footer={
+            <SheetButton
+              tone="neutral"
+              onClick={() => { setReportPost(null); setReportZoom(null); }}
+            >
+              <X size={18} /> ปิด
+            </SheetButton>
+          }
+        >
+          <ReviewImage
+            src={reportPost.imageUrl}
+            images={getPostImages(reportPost)}
+            alt={reportPost.title}
+            onZoom={setReportZoom}
+          />
+
+          {/* ID ของโพสต์ */}
+          <div style={{
+            fontSize: "12px",
+            color: "var(--fg-faint)",
+            fontFamily: "'SF Mono', monospace",
+            wordBreak: "break-all",
+          }}>
+            ID: {reportPost.id}
           </div>
-        </div>
+
+          {/* รายละเอียด */}
+          {reportPost.desc && (
+            <div style={{
+              padding: "14px 16px", backgroundColor: "var(--bg-subtle)", borderRadius: "12px",
+              border: "1px solid var(--border)",
+            }}>
+              <div style={{
+                fontSize: "12px", fontWeight: 700, color: "var(--fg-accent)",
+                marginBottom: "6px", display: "flex", alignItems: "center", gap: "6px",
+              }}>
+                <FileText size={14} /> รายละเอียด
+              </div>
+              <div style={{
+                fontSize: "14.5px",
+                color: "var(--fg-secondary)",
+                lineHeight: 1.75,
+                whiteSpace: "pre-wrap",
+                wordBreak: "break-word",
+              }}>
+                {reportPost.desc}
+              </div>
+            </div>
+          )}
+
+          {/* ข้อมูลตัวเลขและสถานะ */}
+          {(() => {
+            const sl = statusLabel(reportPost);
+            return (
+              <InfoGrid>
+                <InfoRow
+                  icon={ShieldAlert}
+                  label="สถานะโพสต์"
+                  value={(
+                    <span style={{
+                      fontSize: "12px", fontWeight: 700, padding: "2px 8px",
+                      borderRadius: "6px", backgroundColor: sl.bg, color: sl.color,
+                    }}>
+                      {sl.text}
+                    </span>
+                  )}
+                />
+                <InfoRow
+                  icon={PackageSearch}
+                  label="ประเภทโพสต์"
+                  value={reportPost.itemType === "found" ? "ของที่พบ" : "ของหาย"}
+                />
+                <InfoRow icon={MapPin} label="สถานที่" value={reportPost.locationName || "-"} />
+                {reportPost.itemType === "found" && (
+                  <InfoRow
+                    icon={ShieldAlert}
+                    label="จุดฝาก/คืน"
+                    value={reportPost.depositLocation || "ไม่ระบุ"}
+                    color="var(--sc-ok-fg)"
+                    bg="var(--sc-ok-bg)"
+                  />
+                )}
+                <InfoRow icon={User} label="ผู้แจ้ง" value={reportPost.reporterName || "-"} />
+                <InfoRow
+                  icon={Clock}
+                  label="วันที่ / เวลาโพสต์"
+                  value={[
+                    formatDateShort(reportPost.date),
+                    formatClockTime(reportPost.createdAt),
+                  ].filter(Boolean).join(" ") || "-"}
+                />
+              </InfoGrid>
+            );
+          })()}
+        </ReviewSheet>
+      )}
+
+      {/* Lightbox: ดูรูปโพสต์ใหญ่ (ต้องอยู่เหนือกรอบซ้อน zIndex 5010) */}
+      {reportZoom && (
+        <ImageLightbox
+          src={reportZoom}
+          images={getPostImages(reportPost)}
+          onClose={() => setReportZoom(null)}
+          zIndex={5020}
+        />
       )}
 
       {confirmDialog && (
@@ -3571,33 +4061,35 @@ function AdminUsers({ users }: { users: AdminUser[] }) {
       )}
 
       {/* User Detail Modal */}
-      {selectedUser && (
-        <div style={{
-          position: "fixed", inset: 0, backgroundColor: "rgba(5,4,10,0.72)",
-          backdropFilter: "blur(6px)",
-          zIndex: 100, display: "flex", alignItems: "center", justifyContent: "center", padding: "20px",
-          overflowY: "auto",
-        }}>
-          <div style={{
-            backgroundColor: "var(--bg-card)", borderRadius: "20px", padding: "22px",
-            width: "100%", maxWidth: "380px", maxHeight: "calc(100vh - 40px)", overflowY: "auto",
-            margin: "auto",
-            boxShadow: "0 25px 60px rgba(0,0,0,0.6)",
-            border: "1px solid var(--border)",
-          }}>
-            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "16px" }}>
-              <h3 style={{ fontSize: "16px", fontWeight: 800, color: "var(--fg)", margin: 0 }}>รายละเอียดผู้ใช้</h3>
-              <button onClick={() => setSelectedUser(null)} style={{
-                background: "var(--bg-hover)", border: "none", borderRadius: "50%", width: "30px", height: "30px",
-                display: "flex", alignItems: "center", justifyContent: "center", cursor: "pointer", color: "var(--fg-secondary)",
-              }}>
-                <X size={16} />
-              </button>
-            </div>
-
-            <div style={{ textAlign: "center", marginBottom: "16px" }}>
+      <ReviewSheet
+        open={Boolean(selectedUser)}
+        onClose={() => setSelectedUser(null)}
+        title="รายละเอียดผู้ใช้"
+        subtitle={selectedUser?.name || "ไม่ระบุชื่อ"}
+        badge={selectedUser ? (selectedUser.banned
+          ? { label: "บัญชีถูกระงับ", bg: "var(--sc-danger-bg)", color: "var(--sc-danger-fg)" }
+          : { label: "ปกติ", bg: "var(--sc-ok-bg)", color: "var(--sc-ok-fg)" }) : undefined}
+        maxWidth={720}
+        footer={
+          <>
+            {selectedUser?.banned ? (
+              <SheetButton onClick={() => handleUnban(selectedUser)} tone="ok" icon={ShieldCheck}>
+                ปลดแบน
+              </SheetButton>
+            ) : selectedUser ? (
+              <SheetButton onClick={() => handleBan(selectedUser)} tone="danger" icon={Ban}>
+                แบนผู้ใช้
+              </SheetButton>
+            ) : null}
+            <SheetButton onClick={() => setSelectedUser(null)}>ปิด</SheetButton>
+          </>
+        }
+      >
+        {selectedUser && (
+          <>
+            <div style={{ display: "flex", alignItems: "center", gap: "14px", flexWrap: "wrap" }}>
               <div style={{
-                width: "64px", height: "64px", borderRadius: "50%", margin: "0 auto 10px",
+                width: "64px", height: "64px", borderRadius: "50%", flexShrink: 0,
                 background: selectedUser.banned
                   ? "linear-gradient(135deg, #dc2626, #ef4444)"
                   : "linear-gradient(135deg, #7c5cfc, #4f3bd6)",
@@ -3607,148 +4099,116 @@ function AdminUsers({ users }: { users: AdminUser[] }) {
               }}>
                 {(selectedUser.name || selectedUser.email || "?").charAt(0).toUpperCase()}
               </div>
-              <div style={{ fontSize: "17px", fontWeight: 800, color: "var(--fg)" }}>
-                {selectedUser.name || "ไม่ระบุชื่อ"}
+              <div style={{ minWidth: 0 }}>
+                <div style={{ fontSize: "20px", fontWeight: 800, color: "var(--fg)", wordBreak: "break-word" }}>
+                  {selectedUser.name || "ไม่ระบุชื่อ"}
+                </div>
+                <div style={{ fontSize: "13.5px", color: "var(--fg-muted)", wordBreak: "break-all" }}>
+                  {selectedUser.email || "-"}
+                </div>
               </div>
-              <div style={{ fontSize: "12px", color: "var(--fg-muted)" }}>{selectedUser.email || "-"}</div>
-              {selectedUser.banned && (
-                <span style={{
-                  display: "inline-block", marginTop: "8px", fontSize: "11px", fontWeight: 700,
-                  padding: "4px 12px", borderRadius: "8px", backgroundColor: "var(--sc-danger-bg)", color: "var(--sc-danger-fg)",
+            </div>
+
+            <InfoGrid>
+              <InfoRow icon={IdCard} label="User ID" value={selectedUser.id} />
+              <InfoRow icon={Phone} label="เบอร์โทร" value={selectedUser.phone || "-"} />
+              <InfoRow icon={Clock} label="เข้าร่วมเมื่อ" value={selectedUser.createdAt || "-"} />
+              <InfoRow
+                icon={selectedUser.banned ? Ban : ShieldCheck}
+                label="สถานะ"
+                value={selectedUser.banned ? "ถูกแบน" : "ปกติ"}
+                color={selectedUser.banned ? "var(--sc-danger-fg)" : "var(--sc-ok-fg)"}
+                bg={selectedUser.banned ? "var(--sc-danger-bg)" : "var(--sc-ok-bg)"}
+              />
+            </InfoGrid>
+
+            <div>
+              <div style={{ fontSize: "14px", fontWeight: 700, color: "var(--fg)", marginBottom: "8px" }}>
+                โพสต์ของผู้ใช้ <span style={{ color: "var(--fg-accent)" }}>({userPosts.length})</span>
+              </div>
+              {userPosts.length === 0 ? (
+                <div style={{ fontSize: "13px", color: "var(--fg-faint)", padding: "10px 0" }}>ยังไม่มีโพสต์</div>
+              ) : (
+                <div style={{
+                  maxHeight: "220px", overflowY: "auto", borderRadius: "12px",
+                  border: "1px solid var(--border)", backgroundColor: "var(--bg-hover)",
                 }}>
-                  บัญชีถูกระงับ
-                </span>
+                  {userPosts.slice(0, 10).map((p) => (
+                    <div key={p.id} style={{
+                      display: "flex", alignItems: "center", gap: "10px",
+                      padding: "10px 12px", borderBottom: "1px solid var(--border)",
+                    }}>
+                      <div style={{ flex: 1, minWidth: 0 }}>
+                        <div style={{ fontSize: "13.5px", fontWeight: 600, color: "var(--fg)", wordBreak: "break-word" }}>
+                          {p.title}
+                        </div>
+                        <div style={{ fontSize: "12px", color: "var(--fg-faint)", wordBreak: "break-all" }}>
+                          {p.itemType === "lost" ? "ของหาย" : "พบของ"} · {p.id}
+                        </div>
+                      </div>
+                      <span style={{
+                        flexShrink: 0, fontSize: "12px", fontWeight: 700, padding: "3px 9px", borderRadius: "7px",
+                        color: p.status === "resolved" ? "var(--sc-ok-fg)"
+                          : p.status === "suspended" ? "var(--sc-danger-fg)"
+                          : p.status === "under_investigation" ? "var(--sc-warn-fg)"
+                          : p.status === "in_progress" ? "var(--sc-info-fg)" : "var(--sc-ok-fg)",
+                        backgroundColor: p.status === "resolved" ? "var(--sc-ok-bg)"
+                          : p.status === "suspended" ? "var(--sc-danger-bg)"
+                          : p.status === "under_investigation" ? "var(--sc-warn-bg)"
+                          : p.status === "in_progress" ? "var(--sc-info-bg)" : "var(--sc-ok-bg)",
+                      }}>
+                        {p.status === "resolved" ? "คืนแล้ว"
+                          : p.status === "suspended" ? "ถูกระงับ"
+                          : p.status === "under_investigation" ? "อายัด"
+                          : p.status === "in_progress" ? "ดำเนินการ" : "ใช้งาน"}
+                      </span>
+                    </div>
+                  ))}
+                </div>
               )}
             </div>
 
-            {[
-              { label: "User ID", value: selectedUser.id },
-              { label: "เบอร์โทร", value: selectedUser.phone || "-" },
-              { label: "เข้าร่วมเมื่อ", value: selectedUser.createdAt || "-" },
-              { label: "สถานะ", value: selectedUser.banned ? "ถูกแบน" : "ปกติ" },
-            ].map((r, i) => (
-              <div key={i} style={{
-                display: "flex", justifyContent: "space-between", padding: "8px 0",
-                borderBottom: "1px solid var(--border)", fontSize: "12px",
-              }}>
-                <span style={{ color: "var(--fg-faint)" }}>{r.label}</span>
-                <span style={{ fontWeight: 700, color: "var(--fg-strong)" }}>{r.value}</span>
+            <div>
+              <div style={{ fontSize: "14px", fontWeight: 700, color: "var(--fg)", marginBottom: "8px" }}>
+                คำขอรับของ <span style={{ color: "var(--sc-warn-fg)" }}>({userClaims.length})</span>
               </div>
-            ))}
-
-            <div style={{ marginTop: "16px", display: "flex", flexDirection: "column", gap: "12px" }}>
-              <div>
-                <div style={{ fontSize: "12px", fontWeight: 700, color: "var(--fg)", marginBottom: "6px" }}>
-                  โพสต์ของผู้ใช้ <span style={{ color: "var(--fg-accent)" }}>({userPosts.length})</span>
-                </div>
-                {userPosts.length === 0 ? (
-                  <div style={{ fontSize: "11px", color: "var(--fg-faint)", padding: "8px 0" }}>ยังไม่มีโพสต์</div>
-                ) : (
-                  <div style={{
-                    maxHeight: "140px", overflowY: "auto", borderRadius: "10px",
-                    border: "1px solid var(--border)", backgroundColor: "var(--bg-hover)",
-                  }}>
-                    {userPosts.slice(0, 10).map((p) => (
-                      <div key={p.id} style={{
-                        display: "flex", alignItems: "center", gap: "8px",
-                        padding: "8px 10px", borderBottom: "1px solid var(--border)",
+              {userClaims.length === 0 ? (
+                <div style={{ fontSize: "13px", color: "var(--fg-faint)", padding: "10px 0" }}>ยังไม่เคยยื่นคำขอ</div>
+              ) : (
+                <div style={{
+                  maxHeight: "220px", overflowY: "auto", borderRadius: "12px",
+                  border: "1px solid var(--border)", backgroundColor: "var(--bg-hover)",
+                }}>
+                  {userClaims.slice(0, 10).map((c) => {
+                    const b = getStatusBadge(c);
+                    return (
+                      <div key={c.id} style={{
+                        display: "flex", alignItems: "center", gap: "10px",
+                        padding: "10px 12px", borderBottom: "1px solid var(--border)",
                       }}>
                         <div style={{ flex: 1, minWidth: 0 }}>
-                          <div style={{ fontSize: "11.5px", fontWeight: 600, color: "var(--fg)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-                            {p.title}
+                          <div style={{ fontSize: "13.5px", fontWeight: 600, color: "var(--fg)", wordBreak: "break-word" }}>
+                            {c.postTitle || "โพสต์ไม่ระบุชื่อ"}
                           </div>
-                          <div style={{ fontSize: "10px", color: "var(--fg-faint)" }}>
-                            {p.itemType === "lost" ? "ของหาย" : "พบของ"} · {p.id}
+                          <div style={{ fontSize: "12px", color: "var(--fg-faint)", wordBreak: "break-all" }}>
+                            {formatDateShort(c.createdAt) || "-"} · {c.id}
                           </div>
                         </div>
                         <span style={{
-                          fontSize: "9.5px", fontWeight: 700, padding: "2px 7px", borderRadius: "6px",
-                          color: p.status === "resolved" ? "var(--sc-ok-fg)"
-                            : p.status === "suspended" ? "var(--sc-danger-fg)"
-                            : p.status === "under_investigation" ? "var(--sc-warn-fg)"
-                            : p.status === "in_progress" ? "var(--sc-info-fg)" : "var(--sc-ok-fg)",
-                          backgroundColor: p.status === "resolved" ? "var(--sc-ok-bg)"
-                            : p.status === "suspended" ? "var(--sc-danger-bg)"
-                            : p.status === "under_investigation" ? "var(--sc-warn-bg)"
-                            : p.status === "in_progress" ? "var(--sc-info-bg)" : "var(--sc-ok-bg)",
+                          flexShrink: 0, fontSize: "12px", fontWeight: 700, padding: "3px 9px",
+                          borderRadius: "7px", color: b.color, backgroundColor: b.bg,
                         }}>
-                          {p.status === "resolved" ? "คืนแล้ว"
-                            : p.status === "suspended" ? "ถูกระงับ"
-                            : p.status === "under_investigation" ? "อายัด"
-                            : p.status === "in_progress" ? "ดำเนินการ" : "ใช้งาน"}
+                          {b.label}
                         </span>
                       </div>
-                    ))}
-                  </div>
-                )}
-              </div>
-
-              <div>
-                <div style={{ fontSize: "12px", fontWeight: 700, color: "var(--fg)", marginBottom: "6px" }}>
-                  คำขอรับของ <span style={{ color: "var(--sc-warn-fg)" }}>({userClaims.length})</span>
+                    );
+                  })}
                 </div>
-                {userClaims.length === 0 ? (
-                  <div style={{ fontSize: "11px", color: "var(--fg-faint)", padding: "8px 0" }}>ยังไม่เคยยื่นคำขอ</div>
-                ) : (
-                  <div style={{
-                    maxHeight: "140px", overflowY: "auto", borderRadius: "10px",
-                    border: "1px solid var(--border)", backgroundColor: "var(--bg-hover)",
-                  }}>
-                    {userClaims.slice(0, 10).map((c) => {
-                      const b = getStatusBadge(c);
-                      return (
-                        <div key={c.id} style={{
-                          display: "flex", alignItems: "center", gap: "8px",
-                          padding: "8px 10px", borderBottom: "1px solid var(--border)",
-                        }}>
-                          <div style={{ flex: 1, minWidth: 0 }}>
-                            <div style={{ fontSize: "11.5px", fontWeight: 600, color: "var(--fg)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-                              {c.postTitle || "โพสต์ไม่ระบุชื่อ"}
-                            </div>
-                            <div style={{ fontSize: "10px", color: "var(--fg-faint)" }}>
-                              {formatDateShort(c.createdAt) || "-"} · {c.id}
-                            </div>
-                          </div>
-                          <span style={{ fontSize: "9.5px", fontWeight: 700, padding: "2px 7px", borderRadius: "6px", color: b.color, backgroundColor: b.bg }}>
-                            {b.label}
-                          </span>
-                        </div>
-                      );
-                    })}
-                  </div>
-                )}
-              </div>
-            </div>
-
-            <div style={{ display: "flex", gap: "10px", marginTop: "18px" }}>
-              {selectedUser.banned ? (
-                <button onClick={() => handleUnban(selectedUser)} style={{
-                  flex: 1, padding: "11px", borderRadius: "10px", border: "1px solid var(--sc-ok-border)",
-                  backgroundColor: "var(--sc-ok-bg)", color: "var(--sc-ok-fg)", fontSize: "13px", fontWeight: 700,
-                  cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", gap: "6px",
-                }}>
-                  <ShieldCheck size={15} /> ปลดแบน
-                </button>
-              ) : (
-                <button onClick={() => handleBan(selectedUser)} style={{
-                  flex: 1, padding: "11px", borderRadius: "10px", border: "1px solid var(--sc-danger-border)",
-                  backgroundColor: "var(--sc-danger-bg)", color: "var(--sc-danger-fg)", fontSize: "13px", fontWeight: 700,
-                  cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", gap: "6px",
-                }}>
-                  <Ban size={15} /> แบนผู้ใช้
-                </button>
               )}
-              <button onClick={() => setSelectedUser(null)} style={{
-                padding: "11px 20px", borderRadius: "10px",
-                border: "1px solid var(--border)", backgroundColor: "var(--bg-card)",
-                color: "var(--fg-secondary)", fontSize: "13px", fontWeight: 700, cursor: "pointer",
-              }}>
-                ปิด
-              </button>
             </div>
-          </div>
-        </div>
-      )}
+          </>
+        )}
+      </ReviewSheet>
 
       {confirmDialog && (
         <ConfirmModal

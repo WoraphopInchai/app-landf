@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from "react";
-import { Lock, X, ArrowLeft } from "lucide-react";
+import { Lock, ArrowLeft } from "lucide-react";
 import { getAuth, onAuthStateChanged, signOut } from "firebase/auth";
 import type { User } from "firebase/auth";
 import { doc, getDocFromServer, onSnapshot, collection, query, where } from "firebase/firestore";
@@ -17,6 +17,7 @@ import Admin from "./AdminDashboard/Admin";
 import type { AdminTab } from "./AdminDashboard/Admin";
 import TopNav from "./components/TopNav";
 import BottomNav from "./components/BottomNav";
+import Dialog, { DialogButton } from "./components/Dialog";
 import LogoutConfirmModal from "./components/LogoutConfirmModal";
 import RevokedModal from "./components/RevokedModal";
 import { showToast } from "./lib/toast";
@@ -32,6 +33,7 @@ function App() {
   const [adminTab, setAdminTab] = useState<AdminTab>("overview");
   const [selectedItem, setSelectedItem] = useState<PostItem | null>(null);
   const [loginRole, setLoginRole] = useState<"admin" | "user" | null>(null);
+  const [accountType, setAccountType] = useState<"student" | "general" | null>(null);
   const [adminRole, setAdminRole] = useState<"super_admin" | "admin" | null>(null);
   const [adminPoint, setAdminPoint] = useState<string | null>(null);
   const [profileName, setProfileName] = useState<string | null>(null);
@@ -138,6 +140,7 @@ function App() {
           localStorage.removeItem("revokedPending");
           localStorage.removeItem("adminOpen");
           localStorage.removeItem("loginRole");
+          localStorage.removeItem("accountType");
           localStorage.removeItem("adminRole");
           showToast("สิทธิ์แอดมินของคุณถูกถอดออก กรุณาเข้าสู่ระบบใหม่", "error");
           setLoading(false);
@@ -160,6 +163,7 @@ function App() {
             setProfileName(null);
             localStorage.removeItem("adminOpen");
             localStorage.removeItem("loginRole");
+            localStorage.removeItem("accountType");
             localStorage.removeItem("adminRole");
             showToast("บัญชีของคุณถูกระงับการใช้งาน กรุณาติดต่อเจ้าหน้าที่", "error");
             setLoading(false);
@@ -226,6 +230,9 @@ function App() {
           localStorage.getItem("loginRole") === "admin" ? "admin" : "user";
 
         setUser(currentUser);
+        // กู้ช่องทางเดิมกลับมา (ไม่ใช่ช่องทางแอดมิน)
+        const savedAccountType = localStorage.getItem("accountType");
+        setAccountType(savedAccountType === "student" ? "student" : savedAccountType === "general" ? "general" : null);
         if (sessionRole === "admin" && effectiveRole) {
           setLoginRole("admin");
           if (isSavedAdminState) {
@@ -240,6 +247,7 @@ function App() {
         setUser(null);
         setAdminOpen(false);
         setLoginRole(null);
+        setAccountType(null);
         setAdminRole(null);
         setAdminPoint(null);
         setProfileName(null);
@@ -343,6 +351,7 @@ function App() {
       setActivePage("home");
       setSelectedItem(null);
       setLoginRole(null);
+      setAccountType(null);
       setAdminRole(null);
       setAdminPoint(null);
       setAdminOpen(false);
@@ -355,6 +364,7 @@ function App() {
     }
     loginAttemptInProgress.current = false;
     localStorage.removeItem("loginRole");
+    localStorage.removeItem("accountType");
   };
 
   if (loading) {
@@ -407,24 +417,25 @@ function App() {
         title="ย้อนกลับไปท่องเว็บ"
         style={{
           position: "fixed",
-          top: 14,
-          left: 14,
+          top: "max(14px, env(safe-area-inset-top, 0px))",
+          left: "max(14px, env(safe-area-inset-left, 0px))",
           zIndex: 1600,
           display: "flex",
           alignItems: "center",
           gap: 6,
-          padding: "9px 14px",
+          minHeight: 40,
+          padding: "8px 16px",
           borderRadius: 999,
           border: "1px solid var(--border)",
           background: "var(--bg-card)",
           color: "var(--fg-secondary)",
-          fontSize: 13,
+          fontSize: 13.5,
           fontWeight: 700,
           cursor: "pointer",
           boxShadow: "0 6px 18px rgba(0, 0, 0, 0.35)",
         }}
       >
-        <ArrowLeft size={15} />
+        <ArrowLeft size={15} style={{ flexShrink: 0 }} />
         ย้อนกลับ
       </button>
       <Login
@@ -435,10 +446,18 @@ function App() {
           loginAttemptInProgress.current = false;
           setUser(u as unknown as User);
           setLoginRole(u.loginRole || "user");
+          setAccountType(u.accountType ?? null);
           setAdminRole(u.adminRole || null);
           setAdminPoint(u.adminPoint || null);
           setGuestLoginOpen(false);
           localStorage.setItem("loginRole", u.loginRole || "user");
+          // จำช่องทางที่เลือกไว้ เพื่อแสดงป้ายประเภทผู้ใช้ให้ถูกต้องหลังรีเฟรช
+          // (เก็บเฉพาะช่องทางผู้ใช้ ส่วนช่องทางแอดมินไม่ต้องจำ)
+          if (u.accountType) {
+            localStorage.setItem("accountType", u.accountType);
+          } else {
+            localStorage.removeItem("accountType");
+          }
           completePending();
           if (u.adminRole) {
             localStorage.setItem("adminRole", u.adminRole);
@@ -454,132 +473,52 @@ function App() {
           loginAttemptInProgress.current = false;
           setAdminDeniedEmail(email);
         }}
+        onLoginCancel={() => {
+          // ผู้ใช้ปิด popup Google หรือล็อกอินไม่สำเร็จ → รีเซ็ต flag
+          // ไม่งั้น onAuthStateChanged ครั้งถัดไป (เช่น ล็อกอินจากอีกแท็บ) จะเจอ flag เดิม
+          // แล้ว setUser(null) → ดันผู้ใช้กลับหน้า Login ทั้งที่ล็อกอินสำเร็จ
+          loginAttemptInProgress.current = false;
+        }}
       />
       {adminDeniedEmail !== null && (
-        <div
-          style={{
-            position: "fixed",
-            top: 0,
-            left: 0,
-            right: 0,
-            bottom: 0,
-            backgroundColor: "rgba(5, 4, 10, 0.75)",
-            backdropFilter: "blur(8px)",
-            zIndex: 200,
-            display: "flex",
-            alignItems: "center",
-            justifyContent: "center",
-            padding: 20,
-          }}
-          onClick={() => setAdminDeniedEmail(null)}
-        >
-          <div
-            style={{
-              position: "relative",
-              backgroundColor: "var(--bg-card)",
-              border: "1px solid var(--border)",
-              borderRadius: 20,
-              padding: "30px 24px 24px",
-              maxWidth: 400,
-              width: "100%",
-              textAlign: "center",
-              boxShadow:
-                "0 24px 60px rgba(0, 0, 0, 0.6), 0 0 0 1px rgba(239,68,68,0.15), 0 0 40px rgba(239,68,68,0.12)",
-              animation: "slideUp 0.25s ease",
-            }}
-            onClick={(e) => e.stopPropagation()}
-          >
-            <button
-              onClick={() => setAdminDeniedEmail(null)}
-              style={{
-                position: "absolute",
-                top: 12,
-                right: 12,
-                width: 30,
-                height: 30,
-                borderRadius: 8,
-                border: "1px solid var(--border)",
-                background: "var(--bg-subtle)",
-                color: "var(--fg-muted)",
-                display: "flex",
-                alignItems: "center",
-                justifyContent: "center",
-                cursor: "pointer",
-              }}
-            >
-              <X size={14} />
-            </button>
-
-            <div
-              style={{
-                width: 60,
-                height: 60,
-                borderRadius: "50%",
-                background: "linear-gradient(135deg, #ef4444, #b91c1c)",
-                display: "flex",
-                alignItems: "center",
-                justifyContent: "center",
-                margin: "0 auto 16px",
-                boxShadow:
-                  "0 10px 28px rgba(239,68,68,0.45), inset 0 1px 0 rgba(255,255,255,0.2)",
-              }}
-            >
-              <Lock size={26} color="#fff" />
-            </div>
-
-            <div style={{ fontSize: 17, fontWeight: 800, color: "var(--fg)" }}>
-              ไม่มีสิทธิ์เข้าถึง Admin Dashboard
-            </div>
-
-            <div
-              style={{
-                fontSize: 13,
-                color: "var(--fg-muted)",
-                marginTop: 10,
-                lineHeight: 1.6,
-              }}
-            >
-              <div style={{ margin: "0 0 10px" }}>
-                <span
-                  style={{
-                    display: "inline-block",
-                    padding: "4px 12px",
-                    borderRadius: 999,
-                    backgroundColor: "var(--sc-danger-bg)",
-                    border: "1px solid var(--sc-danger-border)",
-                    color: "var(--fg)",
-                    fontWeight: 700,
-                    fontSize: 12.5,
-                  }}
-                >
-                  {adminDeniedEmail || "อีเมลนี้"}
-                </span>
-              </div>
-              ไม่มีสิทธิ์เป็นผู้ดูแลระบบ
-              <br />
-              กรุณาเข้าสู่ระบบด้วยบัญชีบุคคลทั่วไป หรือติดต่อเจ้าหน้าที่เพื่อขอสิทธิ์
-            </div>
-
-            <button
-              onClick={() => setAdminDeniedEmail(null)}
-              style={{
-                marginTop: 22,
-                width: "100%",
-                border: "none",
-                borderRadius: 12,
-                padding: "13px 0",
-                background: "linear-gradient(135deg, #7c5cfc, #6a4eff)",
-                color: "#fff",
-                fontSize: 14.5,
-                fontWeight: 700,
-                cursor: "pointer",
-                boxShadow: "0 8px 24px rgba(124,92,252,0.4)",
-              }}
-            >
+        <Dialog
+          open
+          onClose={() => setAdminDeniedEmail(null)}
+          title="ไม่มีสิทธิ์เข้าถึง Admin Dashboard"
+          icon={Lock}
+          iconTone="danger"
+          align="center"
+          maxWidth={420}
+          zIndex={200}
+          footer={
+            <DialogButton tone="primary" full onClick={() => setAdminDeniedEmail(null)}>
               เข้าใจแล้ว
-            </button>
+            </DialogButton>
+          }
+        >
+          <div style={{ fontSize: 13.5, color: "var(--fg-muted)", lineHeight: 1.65 }}>
+            <div style={{ margin: "0 0 12px" }}>
+              <span
+                style={{
+                  display: "inline-block",
+                  padding: "6px 14px",
+                  borderRadius: 999,
+                  backgroundColor: "var(--sc-danger-bg)",
+                  border: "1px solid var(--sc-danger-border)",
+                  color: "var(--fg)",
+                  fontWeight: 700,
+                  fontSize: 13,
+                  wordBreak: "break-all",
+                }}
+              >
+                {adminDeniedEmail || "อีเมลนี้"}
+              </span>
+            </div>
+            ไม่มีสิทธิ์เป็นผู้ดูแลระบบ
+            <br />
+            กรุณาเข้าสู่ระบบด้วยบัญชีบุคคลทั่วไป หรือติดต่อเจ้าหน้าที่เพื่อขอสิทธิ์
           </div>
-        </div>
+        </Dialog>
       )}
       </div>
   ) : null;
@@ -596,6 +535,7 @@ function App() {
           "ผู้ใช้งาน",
         email: user.email || "",
         role: loginRole,
+        accountType,
       }
     : { role: "user" as const };
 

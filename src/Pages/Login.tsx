@@ -12,6 +12,7 @@ import {
   Lock,
 } from "lucide-react";
 import { signInWithGoogle, auth } from "../firebase";
+import { isUpEmail, type LoginChannel } from "../lib/loginChannel";
 import { doc, getDocFromServer, setDoc, updateDoc } from "firebase/firestore";
 import { db } from "../firebase";
 import { signOut } from "firebase/auth";
@@ -24,6 +25,9 @@ interface LoginProps {
   onLogin?: (user: LoginResult) => void;
   onAdminDenied?: (email: string) => void;
   onLoginStart?: () => void;
+  // เรียกเมื่อผู้ใช้ยกเลิกการเข้าสู่ระบบ (ปิด popup Google / ล็อกอินไม่สำเร็จ)
+  // App ต้องรีเซ็ต flag "กำลังล็อกอิน" ไม่งั้น onAuthStateChanged ครั้งถัดไปจะดันผู้ใช้กลับหน้า Login
+  onLoginCancel?: () => void;
 }
 
 import { isHeadAdminEmail } from "../lib/admins";
@@ -42,8 +46,8 @@ function GoogleIcon() {
   );
 }
 
-export default function Login({ onLogin, onAdminDenied, onLoginStart }: LoginProps) {
-  const [loginType, setLoginType] = useState<"user" | "admin">("user");
+export default function Login({ onLogin, onAdminDenied, onLoginStart, onLoginCancel }: LoginProps) {
+  const [loginType, setLoginType] = useState<LoginChannel>("student");
   const [loading, setLoading] = useState(false);
   const { theme, toggleTheme } = useTheme();
 
@@ -98,6 +102,27 @@ export default function Login({ onLogin, onAdminDenied, onLoginStart }: LoginPro
           return;
         }
 
+        // ตรวจเงื่อนไขของช่องทางที่เลือก (ก่อนเขียนโปรไฟล์ จะได้ไม่บันทึกข้อมูลของช่องทางที่ไม่ผ่าน)
+        // - นิสิตและบุคลากร : ต้องเป็นอีเมลมหาวิทยาลัย @up.ac.th เท่านั้น (Gmail เข้าไม่ได้)
+        // - แอดมิน        : ต้องมีสิทธิ์แอดมินจริง (หัวหน้า หรือ เจ้าหน้าที่ประจำจุด)
+        // - บุคคลทั่วไป    : ไม่มีเงื่อนไข ใช้อีเมลได้ทุกแบบ
+        if (loginType === "student" && !isUpEmail(email)) {
+          await signOut(auth);
+          showToast(
+            "ช่องทางนี้สำหรับนิสิตและบุคลากรมหาวิทยาลัย ต้องใช้อีเมล @up.ac.th เท่านั้น",
+            "error"
+          );
+          setLoading(false);
+          return;
+        }
+
+        if (loginType === "admin" && !adminRole) {
+          await signOut(auth);
+          onAdminDenied?.(user.email || "");
+          setLoading(false);
+          return;
+        }
+
         // เขียนแบบ best-effort: ถ้า rules ไม่อนุญาตให้บันทึก role (ยังไม่ deploy กฎใหม่)
         // ให้ log ไว้แล้วล็อกอินต่อได้ กัน login ค้าง
         try {
@@ -116,27 +141,69 @@ export default function Login({ onLogin, onAdminDenied, onLoginStart }: LoginPro
           console.warn("Cannot save user profile (maybe rules not deployed yet):", error);
         }
 
-        // ต้องมีสิทธิ์แอดมินจริง (หัวหน้า หรือ เจ้าหน้าที่ประจำจุด) ถึงจะเข้าสู่ระบบโหมดแอดมินได้
-        if (loginType === "admin" && !adminRole) {
-          await signOut(auth);
-          onAdminDenied?.(user.email || "");
-          setLoading(false);
-          return;
-        }
+        const accountType: "student" | "general" | null =
+          loginType === "admin" ? null : loginType;
 
         console.log("เข้าสู่ระบบสำเร็จ:", user.displayName, `(${loginType})`);
         if (onLogin)
-          onLogin({ ...user, loginRole: loginType, adminRole, adminPoint: staffPointName || null });
+          onLogin({
+            ...user,
+            loginRole: loginType === "admin" ? "admin" : "user",
+            accountType,
+            adminRole,
+            adminPoint: staffPointName || null,
+          });
+      } else {
+        // ยกเลิกหรือล็อกอินไม่สำเร็จ (เช่นผู้ใช้กดปิดหน้าต่าง popup Google)
+        // ต้องแจ้งให้ App รีเซ็ต flag "กำลังล็อกอิน" ไม่งั้นครั้งถัดไปที่ auth state เปลี่ยน
+        // ผู้ใช้จะถูกดันกลับหน้า Login ทั้งที่ล็อกอินสำเร็จ
+        onLoginCancel?.();
       }
     } catch (error) {
       console.error("เกิดข้อผิดพลาด:", error);
       showToast("เข้าสู่ระบบไม่สำเร็จ กรุณาลองใหม่อีกครั้ง", "error");
+      onLoginCancel?.();
     } finally {
       setLoading(false);
     }
-  }, [loading, loginType, onLogin, onAdminDenied, onLoginStart]);
+  }, [loading, loginType, onLogin, onAdminDenied, onLoginStart, onLoginCancel]);
 
   const isAdmin = loginType === "admin";
+  const isStudent = loginType === "student";
+
+  // ข้อความประจำช่องทาง (ใช้ทั้งหัวฟอร์มและท้ายฟอร์ม)
+  const CHANNEL_COPY = {
+    student: {
+      eyebrow: "สำหรับนิสิตและบุคลากร",
+      title: "เข้าสู่ระบบนิสิตและบุคลากร",
+      sub: "ยืนยันตัวตนด้วยบัญชี Google ของมหาวิทยาลัย เพื่อเริ่มใช้งานระบบแจ้งของหาย",
+      button: "เข้าสู่ระบบด้วย Google",
+      foot: "ต้องใช้อีเมลมหาวิทยาลัย @up.ac.th เท่านั้น",
+      card2Value: "ยืนยันตัวตนด้วย UP Account",
+      card2Label: "อีเมล @up.ac.th ของมหาวิทยาลัยเท่านั้น",
+    },
+    general: {
+      eyebrow: "ยินดีต้อนรับ",
+      title: "เข้าสู่ระบบ",
+      sub: "เข้าสู่ระบบด้วยอีเมลใดก็ได้ เพื่อเริ่มใช้งานระบบแจ้งของหาย",
+      button: "เข้าสู่ระบบด้วย Google",
+      foot: "ใช้ได้ทุกอีเมล ไม่มีเงื่อนไข",
+      card2Value: "ไม่มีเงื่อนไขอีเมล",
+      card2Label: "เข้าใช้งานได้กับอีเมลทุกแหล่ง",
+    },
+    admin: {
+      eyebrow: "Admin Portal",
+      title: "เข้าสู่ระบบผู้ดูแลระบบ",
+      sub: "ยืนยันตัวตนด้วยบัญชี Google ที่ได้รับสิทธิ์ผู้ดูแล เพื่อจัดการข้อมูลและตรวจสอบคำขอรับของ",
+      button: "เข้าสู่ระบบ Admin ด้วย Google",
+      foot: "เฉพาะบัญชีที่ได้รับสิทธิ์ผู้ดูแลระบบเท่านั้น",
+      card2Value: "Security Verified",
+      card2Label: "บันทึกประวัติและตรวจสอบข้อมูลอย่างปลอดภัย",
+    },
+  } as const;
+
+  const copy = CHANNEL_COPY[loginType];
+  const tabIndex = loginType === "student" ? 0 : loginType === "general" ? 1 : 2;
 
   return (
     <div className="lf-login-page">
@@ -525,12 +592,20 @@ export default function Login({ onLogin, onAdminDenied, onLoginStart }: LoginPro
           position: absolute;
           top: 4px;
           bottom: 4px;
-          width: calc(50% - 4px);
+          width: calc((100% - 8px) / 3);
           border-radius: 9px;
           background: linear-gradient(135deg, #7c5cfc, #6a4eff);
           box-shadow: 0 4px 16px rgba(124,92,252,0.4);
           transition: left 0.28s cubic-bezier(0.16, 1, 0.3, 1), background 0.5s ease, box-shadow 0.5s ease;
           z-index: 0;
+        }
+        .lf-tab-indicator--student {
+          background: linear-gradient(135deg, #7c5cfc, #6a4eff);
+          box-shadow: 0 4px 16px rgba(124,92,252,0.4);
+        }
+        .lf-tab-indicator--general {
+          background: linear-gradient(135deg, #0d9488, #0f766e);
+          box-shadow: 0 4px 16px rgba(13,148,136,0.4);
         }
         .lf-tab-indicator--admin {
           background: linear-gradient(135deg, #475569, #1e293b);
@@ -540,19 +615,22 @@ export default function Login({ onLogin, onAdminDenied, onLoginStart }: LoginPro
           flex: 1;
           position: relative;
           z-index: 1;
-          padding: 11px 0;
+          min-width: 0;
+          padding: 11px 2px;
           border: none;
           background: transparent;
           cursor: pointer;
           display: flex;
           align-items: center;
           justify-content: center;
-          gap: 7px;
-          font-size: 13px;
+          gap: 5px;
+          font-size: 12.5px;
           font-weight: 700;
           color: var(--fg-muted);
           transition: color 0.2s ease;
         }
+        .lf-tab svg { flex-shrink: 0; }
+        .lf-tab span, .lf-tab { white-space: nowrap; }
         .lf-tab.active {
           color: #fff;
         }
@@ -602,6 +680,26 @@ export default function Login({ onLogin, onAdminDenied, onLoginStart }: LoginPro
         .lf-google:disabled {
           opacity: 0.7;
           cursor: not-allowed;
+        }
+        /* โหมดนิสิตและบุคลากร: ปุ่มโทนม่วงให้เข้ากับแท็บ */
+        .lf-google--student {
+          border: 1px solid rgba(124, 92, 252, 0.4);
+          background: linear-gradient(180deg, rgba(124, 92, 252, 0.12), rgba(106, 78, 255, 0.06));
+          box-shadow: 0 6px 20px rgba(124, 92, 252, 0.22);
+        }
+        .lf-google--student:hover:not(:disabled) {
+          border-color: rgba(124, 92, 252, 0.7);
+          box-shadow: 0 6px 26px rgba(124, 92, 252, 0.34);
+        }
+        /* โหมดบุคคลทั่วไป: ปุ่มโทนเขียว */
+        .lf-google--general {
+          border: 1px solid rgba(13, 148, 136, 0.4);
+          background: linear-gradient(180deg, rgba(13, 148, 136, 0.12), rgba(15, 118, 110, 0.06));
+          box-shadow: 0 6px 20px rgba(13, 148, 136, 0.22);
+        }
+        .lf-google--general:hover:not(:disabled) {
+          border-color: rgba(13, 148, 136, 0.7);
+          box-shadow: 0 6px 26px rgba(13, 148, 136, 0.34);
         }
         /* โหมด Admin: ปุ่มโทนสเลทเข้ม ฟ้าเทคนิค */
         .lf-google--admin {
@@ -772,13 +870,17 @@ export default function Login({ onLogin, onAdminDenied, onLoginStart }: LoginPro
             style={{ width: 150, height: 150, bottom: 96, right: -26, background: "radial-gradient(circle, rgba(59,130,246,0.45) 0%, transparent 70%)", animationDelay: "-5s" }}
           />
 
-          <div className="lf-banner-content lf-state-in" key={isAdmin ? "admin" : "user"}>
+          <div className="lf-banner-content lf-state-in" key={loginType}>
             <div className="lf-banner-school">
               <div className="lf-banner-school-icon">
                 {isAdmin ? <ShieldCheck size={16} /> : <GraduationCap size={16} />}
               </div>
               <span className="lf-banner-school-label">
-                {isAdmin ? "University of Phayao · Admin Portal" : "University of Phayao"}
+                {isAdmin
+                  ? "University of Phayao · Admin Portal"
+                  : isStudent
+                    ? "University of Phayao · นิสิตและบุคลากร"
+                    : "University of Phayao · บุคคลทั่วไป"}
               </span>
             </div>
 
@@ -792,7 +894,9 @@ export default function Login({ onLogin, onAdminDenied, onLoginStart }: LoginPro
             <p className="lf-banner-desc">
               {isAdmin
                 ? "สำหรับเจ้าหน้าที่และผู้ดูแลระบบเท่านั้น เพื่อตรวจสอบคำขอรับของและดูแลข้อมูลทั้งหมดอย่างปลอดภัย"
-                : "พื้นที่ส่วนกลางสำหรับนิสิตและบุคลากร มหาวิทยาลัยพะเยา"}
+                : isStudent
+                  ? "สำหรับนิสิตและบุคลากร มหาวิทยาลัยพะเยา ยืนยันตัวตนด้วยอีเมลมหาวิทยาลัย"
+                  : "สำหรับบุคคลทั่วไป เข้าใช้งานด้วยอีเมลใดก็ได้ ไม่มีเงื่อนไข"}
             </p>
 
             {/* Feature Highlights (Glassmorphism - เปลี่ยนตาม state, 2 กล่อง) */}
@@ -818,8 +922,8 @@ export default function Login({ onLogin, onAdminDenied, onLoginStart }: LoginPro
                     <Lock size={18} color="#fff" />
                   </div>
                   <div>
-                    <div className="lf-feature-card-value">Security Verified</div>
-                    <div className="lf-feature-card-label">บันทึกประวัติและตรวจสอบข้อมูลอย่างปลอดภัย</div>
+                    <div className="lf-feature-card-value">{copy.card2Value}</div>
+                    <div className="lf-feature-card-label">{copy.card2Label}</div>
                   </div>
                 </div>
               </div>
@@ -842,11 +946,11 @@ export default function Login({ onLogin, onAdminDenied, onLoginStart }: LoginPro
                     className="lf-feature-card-icon"
                     style={{ background: "linear-gradient(135deg, #0ea5e9, #0369a1)", boxShadow: "0 6px 16px rgba(14,165,233,0.35)" }}
                   >
-                    <GraduationCap size={18} color="#fff" />
+                    {isStudent ? <GraduationCap size={18} color="#fff" /> : <Users size={18} color="#fff" />}
                   </div>
                   <div>
-                    <div className="lf-feature-card-value">ปลอดภัยด้วย UP Account</div>
-                    <div className="lf-feature-card-label">เข้าใช้งานผ่าน Google มหาวิทยาลัยพะเยา</div>
+                    <div className="lf-feature-card-value">{copy.card2Value}</div>
+                    <div className="lf-feature-card-label">{copy.card2Label}</div>
                   </div>
                 </div>
               </div>
@@ -857,31 +961,33 @@ export default function Login({ onLogin, onAdminDenied, onLoginStart }: LoginPro
         {/* ============ ฝั่งขวา: ฟอร์ม (ธีมตาม state) ============ */}
         <section className="lf-form">
           <div className="lf-form-inner">
-            <div className="lf-form-head lf-state-in" key={`form-${isAdmin ? "admin" : "user"}`}>
+            <div className="lf-form-head lf-state-in" key={`form-${loginType}`}>
               <div className="lf-form-eyebrow">
-                {isAdmin ? <ShieldCheck size={13} /> : <LayoutDashboard size={13} />}
-                {isAdmin ? "Admin Portal" : "ยินดีต้อนรับ"}
+                {isAdmin ? <ShieldCheck size={13} /> : isStudent ? <GraduationCap size={13} /> : <LayoutDashboard size={13} />}
+                {copy.eyebrow}
               </div>
-              <h2 className="lf-form-title">
-                {isAdmin ? "เข้าสู่ระบบผู้ดูแลระบบ" : "เข้าสู่ระบบ"}
-              </h2>
-              <p className="lf-form-sub">
-                {isAdmin
-                  ? "ยืนยันตัวตนด้วยบัญชี Google ที่ได้รับสิทธิ์ผู้ดูแล เพื่อจัดการข้อมูลและตรวจสอบคำขอรับของ"
-                  : "เลือกประเภทผู้ใช้และเข้าสู่ระบบ เพื่อเริ่มใช้งานระบบแจ้งของหาย"}
-              </p>
+              <h2 className="lf-form-title">{copy.title}</h2>
+              <p className="lf-form-sub">{copy.sub}</p>
             </div>
 
-            {/* ตัวเลือกประเภทผู้ใช้ */}
+            {/* ตัวเลือกช่องทางเข้าสู่ระบบ 3 ช่องทาง */}
             <div className="lf-tabs">
               <div
-                className={`lf-tab-indicator ${isAdmin ? "lf-tab-indicator--admin" : ""}`}
-                style={{ left: isAdmin ? "calc(50% + 0px)" : "0px" }}
+                className={`lf-tab-indicator lf-tab-indicator--${loginType}`}
+                style={{ left: `calc(4px + (100% - 8px) / 3 * ${tabIndex})` }}
               />
               <button
                 type="button"
-                className={`lf-tab ${!isAdmin ? "active" : ""}`}
-                onClick={() => setLoginType("user")}
+                className={`lf-tab ${isStudent ? "active" : ""}`}
+                onClick={() => setLoginType("student")}
+              >
+                <GraduationCap size={14} />
+                นิสิต/บุคลากร
+              </button>
+              <button
+                type="button"
+                className={`lf-tab ${loginType === "general" ? "active" : ""}`}
+                onClick={() => setLoginType("general")}
               >
                 <Users size={14} />
                 บุคคลทั่วไป
@@ -898,10 +1004,10 @@ export default function Login({ onLogin, onAdminDenied, onLoginStart }: LoginPro
 
             <div className="lf-google-divider">เข้าสู่ระบบต่อด้วย Google</div>
 
-            {/* ปุ่มเข้าสู่ระบบด้วย Google (ธีมตาม state) */}
+            {/* ปุ่มเข้าสู่ระบบด้วย Google (ธีมตามช่องทาง) */}
             <button
               type="button"
-              className={`lf-google ${isAdmin ? "lf-google--admin" : ""}`}
+              className={`lf-google lf-google--${loginType}`}
               onClick={handleLogin}
               disabled={loading}
             >
@@ -913,18 +1019,14 @@ export default function Login({ onLogin, onAdminDenied, onLoginStart }: LoginPro
               ) : (
                 <>
                   <GoogleIcon />
-                  {isAdmin ? "เข้าสู่ระบบ Admin ด้วย Google" : "เข้าสู่ระบบด้วย Google"}
+                  {copy.button}
                 </>
               )}
             </button>
 
             <div className="lf-form-foot">
               <span className="lf-form-foot-dot" />
-              <span>
-                {isAdmin
-                  ? "เฉพาะบัญชีที่ได้รับสิทธิ์ผู้ดูแลระบบเท่านั้น"
-                  : "การเข้าสู่ระบบใช้บัญชี Google เพื่อยืนยันตัวตนเท่านั้น"}
-              </span>
+              <span>{copy.foot}</span>
             </div>
           </div>
         </section>

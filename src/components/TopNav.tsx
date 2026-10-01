@@ -168,7 +168,7 @@ function SwipeableNotifRow(props: {
         }}
       >
         <Trash2 size={16} />
-        <span style={{ fontSize: 11, fontWeight: 700 }}>ลบ</span>
+        <span style={{ fontSize: 12, fontWeight: 700 }}>ลบ</span>
       </button>
       <div
         onClickCapture={handleClickCapture}
@@ -361,7 +361,7 @@ export default function TopNav({
               <div
                 className="topnav-label"
                 style={{
-                  fontSize: 10,
+                  fontSize: 12,
                   color: "var(--fg-muted)",
                   fontWeight: 600,
                   letterSpacing: "0.02em",
@@ -420,7 +420,7 @@ export default function TopNav({
                           borderRadius: 999,
                           backgroundColor: "#ef4444",
                           color: "#ffffff",
-                          fontSize: 9.5,
+                          fontSize: 12,
                           fontWeight: 800,
                           lineHeight: "16px",
                           textAlign: "center",
@@ -478,9 +478,9 @@ export default function TopNav({
                   onClick={() => setNotifOpen((o) => !o)}
                   title="การแจ้งเตือน"
                   style={{
-                    width: 34,
-                    height: 34,
-                    borderRadius: 8,
+                    width: 40,
+                    height: 40,
+                    borderRadius: 10,
                     border: "1px solid var(--border)",
                     background: "var(--bg-card)",
                     color: "var(--fg-secondary)",
@@ -505,7 +505,7 @@ export default function TopNav({
                         borderRadius: 999,
                         background: "#ef4444",
                         color: "#ffffff",
-                        fontSize: 10,
+                        fontSize: 12,
                         fontWeight: 800,
                         display: "flex",
                         alignItems: "center",
@@ -536,9 +536,11 @@ export default function TopNav({
                         position: "absolute",
                         top: "calc(100% + 8px)",
                         right: 0,
-                        width: 330,
-                        maxHeight: 430,
+                        width: "min(330px, calc(100vw - 24px))",
+                        maxHeight: "min(430px, 62dvh)",
                         overflowY: "auto",
+                        overscrollBehavior: "contain",
+                        WebkitOverflowScrolling: "touch",
                         background: "var(--bg-card)",
                         border: "1px solid var(--border)",
                         borderRadius: 14,
@@ -572,7 +574,7 @@ export default function TopNav({
                             <span
                               style={{
                                 marginLeft: 6,
-                                fontSize: 10,
+                                fontSize: 12,
                                 fontWeight: 800,
                                 color: "#ef4444",
                               }}
@@ -591,7 +593,7 @@ export default function TopNav({
                               background: "none",
                               border: "none",
                               color: "var(--fg-accent)",
-                              fontSize: 11,
+                              fontSize: 12,
                               fontWeight: 700,
                               cursor: "pointer",
                               padding: "2px 4px",
@@ -859,7 +861,7 @@ export default function TopNav({
                                 </div>
                                 <div
                                   style={{
-                                    fontSize: 11,
+                                    fontSize: 12,
                                     color: "var(--fg-muted)",
                                     whiteSpace: "nowrap",
                                     overflow: "hidden",
@@ -871,7 +873,7 @@ export default function TopNav({
                                 </div>
                                 <div
                                   style={{
-                                    fontSize: 10,
+                                    fontSize: 12,
                                     color: "var(--fg-faint)",
                                     marginTop: 2,
                                   }}
@@ -929,9 +931,9 @@ export default function TopNav({
               onClick={toggleTheme}
               title={theme === "dark" ? "สลับเป็นโหมดสว่าง" : "สลับเป็นโหมดมืด"}
               style={{
-                width: 34,
-                height: 34,
-                borderRadius: 8,
+                width: 40,
+                height: 40,
+                borderRadius: 10,
                 border: "1px solid var(--border)",
                 background: "var(--bg-card)",
                 color: "var(--fg-secondary)",
@@ -1022,9 +1024,9 @@ export default function TopNav({
               onClick={onLogout}
               title="ออกจากระบบ"
               style={{
-                width: 34,
-                height: 34,
-                borderRadius: 8,
+                width: 40,
+                height: 40,
+                borderRadius: 10,
                 border: "1px solid var(--border)",
                 background: "var(--bg-card)",
                 color: "var(--fg-muted)",

@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo, useRef } from "react";
+import { useState, useEffect, useRef } from "react";
 import {
   Search,
   MapPin,
@@ -15,7 +15,6 @@ import {
   CheckCircle2,
   Plus,
   ArrowRight,
-  BarChart3,
   Send,
   RefreshCw,
 } from "lucide-react";
@@ -43,7 +42,10 @@ import { ITEM_CATEGORIES } from "../constants";
 import { refreshLoginStats } from "../lib/loginStats";
 import { isCurrentUserBanned } from "../lib/userGuard";
 import ToastContainer from "../components/Toast";
+import Dialog, { DialogButton } from "../components/Dialog";
 import { showToast } from "../lib/toast";
+import { getPostCover } from "../lib/postImages";
+import ImageCountBadge from "../components/ImageCountBadge";
 
 interface HomeProps {
   user?: AppUser;
@@ -253,6 +255,7 @@ export default function Home({
             securityZone: data.securityZone || "",
             desc: data.desc || "",
             imageUrl: data.imageUrl || null,
+            imageUrls: Array.isArray(data.imageUrls) ? data.imageUrls : [],
             status: data.status || "active",
             createdAt: data.createdAt,
             resolvedAt: data.resolvedAt,
@@ -350,6 +353,7 @@ export default function Home({
             securityZone: data.securityZone || "",
             desc: data.desc || "",
             imageUrl: data.imageUrl || null,
+            imageUrls: Array.isArray(data.imageUrls) ? data.imageUrls : [],
             status: data.status || "active",
             createdAt: data.createdAt,
             resolvedAt: data.resolvedAt,
@@ -387,68 +391,6 @@ export default function Home({
     return () => clearTimeout(timer);
   }, [posts]);
 
-  // =========================
-  // ข้อมูลจริงสำหรับการ์ด "ภาพรวมวันนี้" (แทน demo ที่เขียนตายตัว)
-  // =========================
-  const heroData = useMemo(() => {
-    const lostCount = posts.filter(
-      (p) => p.itemType === "lost" && p.status === "active"
-    ).length;
-    const foundCount = posts.filter(
-      (p) => p.itemType === "found" && p.status === "active"
-    ).length;
-    const resolvedCount = posts.filter((p) => p.status === "resolved").length;
-
-    // จำนวนโพสต์ใหม่ย้อนหลัง 7 วัน (วันนี้ + 6 วันก่อน)
-    const dayStart = (offset: number) => {
-      const d = new Date();
-      d.setHours(0, 0, 0, 0);
-      d.setDate(d.getDate() - offset);
-      return d.getTime();
-    };
-    const activity = Array.from({ length: 7 }, (_, i) => {
-      const start = dayStart(i);
-      const end = dayStart(i - 1);
-      return posts.filter((p) => {
-        const t = resolveTime(p.createdAt);
-        return t >= start && t < end;
-      }).length;
-    });
-    const maxActivity = Math.max(...activity, 1);
-
-    const sorted = [...posts].sort(
-      (a, b) => resolveTime(b.createdAt) - resolveTime(a.createdAt)
-    );
-    const recentLost =
-      sorted.find((p) => p.itemType === "lost" && p.status === "active") ||
-      null;
-    const recentFound =
-      sorted.find((p) => p.itemType === "found" && p.status === "active") ||
-      null;
-
-    let aiTop = 0;
-    let aiPairs = 0;
-    posts.forEach((p) => {
-      if (p.matches && p.matches.length > 0) {
-        aiPairs += p.matches.length;
-        if (p.matches[0].similarityScore > aiTop) {
-          aiTop = p.matches[0].similarityScore;
-        }
-      }
-    });
-
-    return {
-      lostCount,
-      foundCount,
-      resolvedCount,
-      activity,
-      maxActivity,
-      recentLost,
-      recentFound,
-      aiTop,
-      aiPairs,
-    };
-  }, [posts]);
 
   // กรองโพสต์ตาม Search / ประเภท / อาคาร-คณะ
   const filteredPosts = posts.filter((post) => {
@@ -622,7 +564,7 @@ export default function Home({
       gap: 5,
       padding: "3px 9px",
       borderRadius: 999,
-      fontSize: 11,
+      fontSize: 12,
       fontWeight: 700,
       border: "1px solid transparent",
     };
@@ -1062,26 +1004,16 @@ export default function Home({
           padding: "0 24px",
         }}
       >
-        {/* ============ Hero: Split (Frame.io Style) ============ */}
-        <style>{`
-          @media (max-width: 860px) {
-            .hero-split { grid-template-columns: 1fr !important; }
-            .hero-preview { display: none; }
-          }
-        `}</style>
+        {/* ============ Hero ============ */}
         <section
           className="hero-split"
           style={{
             position: "relative",
-            display: "grid",
-            gridTemplateColumns: "1.05fr 0.95fr",
-            gap: 44,
-            alignItems: "center",
             padding: "52px 0 34px",
           }}
         >
-          {/* --- Left: Headline + CTA --- */}
-          <div style={{ animation: "lafFadeInUp 0.4s ease-out both" }}>
+          {/* --- Headline + CTA --- */}
+          <div style={{ animation: "lafFadeInUp 0.4s ease-out both", maxWidth: 640 }}>
             <div
               style={{
                 display: "inline-flex",
@@ -1092,7 +1024,7 @@ export default function Home({
                 background: "rgba(124,92,252,0.14)",
                 border: "1px solid rgba(124,92,252,0.35)",
                 color: "var(--fg-accent)",
-                fontSize: 11.5,
+                fontSize: 12,
                 fontWeight: 700,
                 letterSpacing: "0.02em",
               }}
@@ -1191,289 +1123,6 @@ export default function Home({
               </button>
             </div>
 
-            </div>
-
-          {/* --- Right: Dashboard Preview Card w/ Glow --- */}
-          <div
-            className="hero-preview"
-            style={{
-              position: "relative",
-              animation: "lafFadeInUp 0.5s ease-out 0.1s both",
-            }}
-          >
-            <div
-              style={{
-                position: "absolute",
-                inset: -30,
-                background:
-                  "radial-gradient(50% 50% at 50% 45%, rgba(124,92,252,0.35) 0%, rgba(124,92,252,0.08) 55%, transparent 75%)",
-                filter: "blur(30px)",
-                pointerEvents: "none",
-              }}
-            />
-            <div
-              style={{
-                position: "relative",
-                background: "var(--bg-card)",
-                border: "1px solid var(--border)",
-                borderRadius: 16,
-                padding: 18,
-                boxShadow:
-                  "0 0 0 1px rgba(124,92,252,0.12), 0 24px 60px rgba(0,0,0,0.5), 0 0 60px rgba(124,92,252,0.18)",
-              }}
-            >
-              {/* Card header */}
-              <div
-                style={{
-                  display: "flex",
-                  alignItems: "center",
-                  gap: 10,
-                  borderBottom: "1px solid var(--border)",
-                  paddingBottom: 12,
-                }}
-              >
-                <div
-                  style={{
-                    width: 34,
-                    height: 34,
-                    borderRadius: 9,
-                    background: "linear-gradient(135deg, #7c5cfc, #4f3bd6)",
-                    display: "flex",
-                    alignItems: "center",
-                    justifyContent: "center",
-                    boxShadow: "0 4px 14px rgba(124,92,252,0.45)",
-                  }}
-                >
-                  <BarChart3 size={16} color="var(--accent-fg)" />
-                </div>
-                <div style={{ flex: 1 }}>
-                  <div style={{ fontSize: 13.5, fontWeight: 800, color: "var(--fg)" }}>
-                    ภาพรวมวันนี้
-                  </div>
-                  <div style={{ fontSize: 11, color: "var(--fg-muted)", marginTop: 1 }}>
-                    อัปเดตเรียลไทม์จากระบบ
-                  </div>
-                </div>
-                <span
-                  style={{
-                    display: "inline-flex",
-                    alignItems: "center",
-                    gap: 5,
-                    fontSize: 10,
-                    fontWeight: 800,
-                    color: "var(--sc-ok-fg)",
-                    background: "rgba(52,211,153,0.12)",
-                    border: "1px solid rgba(52,211,153,0.3)",
-                    padding: "3px 8px",
-                    borderRadius: 999,
-                    letterSpacing: "0.05em",
-                  }}
-                >
-                  <span style={{ width: 5, height: 5, borderRadius: "50%", background: "var(--sc-ok-fg)", animation: "lafPulse 1.4s ease-in-out infinite" }} />
-                  LIVE
-                </span>
-              </div>
-
-              {/* Stat blocks */}
-              <div style={{ display: "flex", gap: 8, marginTop: 14 }}>
-                {[
-                  { label: "ของหาย", value: String(heroData.lostCount), color: "var(--sc-warn-fg)" },
-                  { label: "ของพบ", value: String(heroData.foundCount), color: "var(--sc-ok-fg)" },
-                  { label: "คืนแล้ว", value: String(heroData.resolvedCount), color: "var(--fg-secondary)" },
-                ].map((s) => (
-                  <div
-                    key={s.label}
-                    style={{
-                      flex: 1,
-                      background: "var(--bg-subtle)",
-                      border: "1px solid var(--border)",
-                      borderRadius: 10,
-                      padding: "9px 12px",
-                    }}
-                  >
-                    <div style={{ display: "flex", alignItems: "center", gap: 5 }}>
-                      <span style={{ width: 6, height: 6, borderRadius: "50%", background: s.color }} />
-                      <span style={{ fontSize: 10.5, color: "var(--fg-muted)", fontWeight: 600 }}>{s.label}</span>
-                    </div>
-                    <div style={{ fontSize: 17, fontWeight: 800, color: "var(--fg)", marginTop: 3 }}>
-                      {s.value}
-                    </div>
-                  </div>
-                ))}
-              </div>
-
-              {/* Mini bar chart */}
-              <div
-                style={{
-                  display: "flex",
-                  alignItems: "flex-end",
-                  gap: 6,
-                  height: 66,
-                  marginTop: 16,
-                  padding: "10px 12px",
-                  background: "var(--bg-subtle)",
-                  border: "1px solid var(--border)",
-                  borderRadius: 10,
-                }}
-              >
-                {heroData.activity.map((h, i) => {
-                  const pct =
-                    h === 0
-                      ? 5
-                      : Math.max(14, Math.round((h / heroData.maxActivity) * 100));
-                  return (
-                    <div
-                      key={i}
-                      style={{
-                        flex: 1,
-                        height: `${pct}%`,
-                        borderRadius: 4,
-                        background:
-                          i >= 5
-                            ? "linear-gradient(180deg, var(--sc-brand-fg), #7c5cfc)"
-                            : "#2f2a44",
-                        boxShadow:
-                          i >= 5 ? "0 0 10px rgba(124,92,252,0.5)" : "none",
-                        minHeight: 5,
-                      }}
-                    />
-                  );
-                })}
-              </div>
-
-              {/* Recent rows (ข้อมูลจริงล่าสุด) */}
-              <div style={{ display: "flex", flexDirection: "column", gap: 8, marginTop: 14 }}>
-                {(
-                  [
-                    { post: heroData.recentLost, type: "lost" as const },
-                    { post: heroData.recentFound, type: "found" as const },
-                  ] as const
-                ).map(({ post, type }) => {
-                  const isLost = type === "lost";
-                  if (!post) {
-                    return (
-                      <div
-                        key={type}
-                        style={{
-                          display: "flex",
-                          alignItems: "center",
-                          gap: 10,
-                          background: "var(--bg-subtle)",
-                          border: "1px solid var(--border)",
-                          borderRadius: 10,
-                          padding: "9px 12px",
-                        }}
-                      >
-                        <div
-                          style={{
-                            width: 28,
-                            height: 28,
-                            borderRadius: 8,
-                            background: "var(--bg-hover)",
-                            display: "flex",
-                            alignItems: "center",
-                            justifyContent: "center",
-                            fontSize: 12,
-                            fontWeight: 800,
-                            color: "var(--fg-faint)",
-                          }}
-                        >
-                          —
-                        </div>
-                        <div
-                          style={{
-                            flex: 1,
-                            fontSize: 12,
-                            color: "var(--fg-faint)",
-                            fontWeight: 600,
-                          }}
-                        >
-                          ยังไม่มีรายการของ{isLost ? "หาย" : "พบ"}ล่าสุด
-                        </div>
-                      </div>
-                    );
-                  }
-                  return (
-                    <div
-                      key={post.id}
-                      style={{
-                        display: "flex",
-                        alignItems: "center",
-                        gap: 10,
-                        background: "var(--bg-subtle)",
-                        border: "1px solid var(--border)",
-                        borderRadius: 10,
-                        padding: "9px 12px",
-                      }}
-                    >
-                      <div
-                        style={{
-                          width: 28,
-                          height: 28,
-                          borderRadius: 8,
-                          background: "linear-gradient(135deg, var(--bg-hover), var(--bg-card))",
-                          display: "flex",
-                          alignItems: "center",
-                          justifyContent: "center",
-                          fontSize: 12,
-                          fontWeight: 800,
-                          color: isLost ? "var(--sc-warn-fg)" : "var(--sc-ok-fg)",
-                        }}
-                      >
-                        {(post.title || "?").charAt(0).toUpperCase()}
-                      </div>
-                      <div style={{ flex: 1, minWidth: 0 }}>
-                        <div style={{ fontSize: 12, fontWeight: 700, color: "var(--fg)", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
-                          {post.title}
-                        </div>
-                        <div style={{ fontSize: 10.5, color: "var(--fg-muted)", marginTop: 1 }}>
-                          {post.building || post.locationName || "ไม่ระบุสถานที่"} · {timeAgo(post.createdAt)}
-                        </div>
-                      </div>
-                      <span
-                        style={{
-                          fontSize: 9.5,
-                          fontWeight: 800,
-                          color: isLost ? "var(--sc-warn-fg)" : "var(--sc-ok-fg)",
-                          background: isLost ? "var(--sc-warn-bg)" : "var(--sc-ok-bg)",
-                          border: isLost ? "1px solid var(--sc-warn-border)" : "1px solid var(--sc-ok-border)",
-                          padding: "3px 7px",
-                          borderRadius: 999,
-                        }}
-                      >
-                        {isLost ? "LOST" : "FOUND"}
-                      </span>
-                    </div>
-                  );
-                })}
-              </div>
-            </div>
-
-            {/* Floating AI match chip (ข้อมูลจริงจาก matches) */}
-            {heroData.aiPairs > 0 && (
-              <div
-                style={{
-                  position: "absolute",
-                  top: -14,
-                  right: 16,
-                  display: "inline-flex",
-                  alignItems: "center",
-                  gap: 6,
-                  background: "var(--bg-card)",
-                  border: "1px solid rgba(124,92,252,0.45)",
-                  borderRadius: 999,
-                  padding: "5px 11px",
-                  fontSize: 11,
-                  fontWeight: 800,
-                  color: "var(--fg-accent)",
-                  boxShadow: "0 8px 24px rgba(124,92,252,0.35)",
-                  animation: "lafGlowPulse 4s ease-in-out infinite",
-                }}
-              >
-                <Sparkles size={12} />
-                AI เทียบเคียง {heroData.aiPairs} คู่ · ตรง {heroData.aiTop}%
-              </div>
-            )}
           </div>
         </section>
 
@@ -1540,9 +1189,9 @@ export default function Home({
                 display: "inline-flex",
                 alignItems: "center",
                 gap: 6,
-                height: 32,
-                padding: "0 14px",
-                borderRadius: 9,
+                minHeight: 40,
+                padding: "0 16px",
+                borderRadius: 10,
                 border: "none",
                 background: "#7c5cfc",
                 color: "var(--accent-fg)",
@@ -1605,7 +1254,7 @@ export default function Home({
                       display: "inline-flex",
                       alignItems: "center",
                       justifyContent: "center",
-                      fontSize: 10.5,
+                      fontSize: 12,
                       fontWeight: 700,
                       background: active ? "rgba(255,255,255,0.22)" : "var(--bg-hover)",
                       color: active ? "var(--fg)" : "var(--fg-secondary)",
@@ -1684,7 +1333,7 @@ export default function Home({
                   border: "1px solid rgba(124,92,252,0.40)",
                   background: "rgba(124,92,252,0.10)",
                   color: "var(--fg-accent)",
-                  fontSize: 11.5,
+                  fontSize: 12,
                   fontWeight: 700,
                   cursor: refreshing ? "not-allowed" : "pointer",
                   opacity: refreshing ? 0.55 : 1,
@@ -1713,7 +1362,7 @@ export default function Home({
                       display: "inline-flex",
                       alignItems: "center",
                       gap: 5,
-                      fontSize: 11,
+                      fontSize: 12,
                       fontWeight: 700,
                       color: "#7c5cfc",
                       padding: "5px 10px",
@@ -1734,7 +1383,7 @@ export default function Home({
                       display: "inline-flex",
                       alignItems: "center",
                       gap: 5,
-                      fontSize: 11,
+                      fontSize: 12,
                       fontWeight: 700,
                       color: "var(--sc-ok-fg)",
                       padding: "5px 10px",
@@ -1755,7 +1404,7 @@ export default function Home({
                       display: "inline-flex",
                       alignItems: "center",
                       gap: 4,
-                      fontSize: 10.5,
+                      fontSize: 12,
                       fontWeight: 600,
                       color: "var(--fg-faint)",
                     }}
@@ -1777,7 +1426,7 @@ export default function Home({
                   display: "flex",
                   alignItems: "center",
                   gap: 6,
-                  fontSize: 11,
+                  fontSize: 12,
                   color: "var(--fg-muted)",
                   lineHeight: 1.5,
                   marginBottom: 8,
@@ -1807,7 +1456,7 @@ export default function Home({
                         display: "flex",
                         alignItems: "center",
                         gap: 6,
-                        fontSize: 11.5,
+                        fontSize: 12,
                         fontWeight: 800,
                         color: "var(--sc-ok-fg)",
                       }}
@@ -1845,19 +1494,22 @@ export default function Home({
                             cursor: "pointer",
                           }}
                         >
-                          {other.imageUrl ? (
-                            <img
-                              src={other.imageUrl}
-                              alt={other.title || "รูปสิ่งของ"}
-                              style={{
-                                width: 44,
-                                height: 44,
-                                borderRadius: 10,
-                                objectFit: "cover",
-                                flexShrink: 0,
-                                background: "var(--bg-card)",
-                              }}
-                            />
+                          {getPostCover(other) ? (
+                            <div style={{ position: "relative", width: 44, height: 44, flexShrink: 0 }}>
+                              <img
+                                src={getPostCover(other) || undefined}
+                                alt={other.title || "รูปสิ่งของ"}
+                                style={{
+                                  width: 44,
+                                  height: 44,
+                                  borderRadius: 10,
+                                  objectFit: "cover",
+                                  flexShrink: 0,
+                                  background: "var(--bg-card)",
+                                }}
+                              />
+                              <ImageCountBadge post={other} size="sm" />
+                            </div>
                           ) : (
                             <div
                               style={{
@@ -1883,7 +1535,7 @@ export default function Home({
                           <div style={{ flex: 1, minWidth: 0 }}>
                             <div
                               style={{
-                                fontSize: 10.5,
+                                fontSize: 12,
                                 fontWeight: 700,
                                 color: "var(--sc-ok-fg)",
                                 whiteSpace: "nowrap",
@@ -1907,7 +1559,7 @@ export default function Home({
                             </div>
                             <div
                               style={{
-                                fontSize: 11,
+                                fontSize: 12,
                                 color: "var(--fg-muted)",
                                 marginTop: 1,
                                 whiteSpace: "nowrap",
@@ -1920,7 +1572,7 @@ export default function Home({
                             {row.reason && (
                               <div
                                 style={{
-                                  fontSize: 10.5,
+                                  fontSize: 12,
                                   color: "var(--fg-faint)",
                                   marginTop: 2,
                                   lineHeight: 1.4,
@@ -1944,7 +1596,7 @@ export default function Home({
                                 display: "inline-flex",
                                 alignItems: "center",
                                 gap: 3,
-                                fontSize: 9,
+                                fontSize: 12,
                                 fontWeight: 800,
                                 letterSpacing: "0.4px",
                                 color: "var(--sc-ok-fg)",
@@ -1963,7 +1615,7 @@ export default function Home({
                                 display: "inline-flex",
                                 alignItems: "center",
                                 gap: 4,
-                                fontSize: 11.5,
+                                fontSize: 12,
                                 fontWeight: 800,
                                 background: "rgba(52,211,153,0.12)",
                                 border: "1px solid rgba(52,211,153,0.35)",
@@ -1988,7 +1640,7 @@ export default function Home({
                         display: "flex",
                         alignItems: "center",
                         gap: 6,
-                        fontSize: 11.5,
+                        fontSize: 12,
                         fontWeight: 800,
                         color: "var(--sc-warn-fg)",
                       }}
@@ -2027,19 +1679,22 @@ export default function Home({
                             cursor: "pointer",
                           }}
                         >
-                          {other.imageUrl ? (
-                            <img
-                              src={other.imageUrl}
-                              alt={other.title || "รูปสิ่งของ"}
-                              style={{
-                                width: 44,
-                                height: 44,
-                                borderRadius: 10,
-                                objectFit: "cover",
-                                flexShrink: 0,
-                                background: "var(--bg-card)",
-                              }}
-                            />
+                          {getPostCover(other) ? (
+                            <div style={{ position: "relative", width: 44, height: 44, flexShrink: 0 }}>
+                              <img
+                                src={getPostCover(other) || undefined}
+                                alt={other.title || "รูปสิ่งของ"}
+                                style={{
+                                  width: 44,
+                                  height: 44,
+                                  borderRadius: 10,
+                                  objectFit: "cover",
+                                  flexShrink: 0,
+                                  background: "var(--bg-card)",
+                                }}
+                              />
+                              <ImageCountBadge post={other} size="sm" />
+                            </div>
                           ) : (
                             <div
                               style={{
@@ -2065,7 +1720,7 @@ export default function Home({
                           <div style={{ flex: 1, minWidth: 0 }}>
                             <div
                               style={{
-                                fontSize: 10.5,
+                                fontSize: 12,
                                 fontWeight: 700,
                                 color: "var(--sc-warn-fg)",
                                 whiteSpace: "nowrap",
@@ -2089,7 +1744,7 @@ export default function Home({
                             </div>
                             <div
                               style={{
-                                fontSize: 11,
+                                fontSize: 12,
                                 color: "var(--fg-muted)",
                                 marginTop: 1,
                                 whiteSpace: "nowrap",
@@ -2102,7 +1757,7 @@ export default function Home({
                             {row.reason && (
                               <div
                                 style={{
-                                  fontSize: 10.5,
+                                  fontSize: 12,
                                   color: "var(--fg-faint)",
                                   marginTop: 2,
                                   lineHeight: 1.4,
@@ -2126,7 +1781,7 @@ export default function Home({
                                 display: "inline-flex",
                                 alignItems: "center",
                                 gap: 3,
-                                fontSize: 9,
+                                fontSize: 12,
                                 fontWeight: 800,
                                 letterSpacing: "0.4px",
                                 color: "var(--sc-warn-fg)",
@@ -2144,7 +1799,7 @@ export default function Home({
                                 display: "inline-flex",
                                 alignItems: "center",
                                 gap: 4,
-                                fontSize: 11.5,
+                                fontSize: 12,
                                 fontWeight: 800,
                                 background: "rgba(124,92,252,0.12)",
                                 border: "1px solid rgba(124,92,252,0.35)",
@@ -2180,7 +1835,7 @@ export default function Home({
                                   border: "1px solid rgba(52,211,153,0.45)",
                                   background: "rgba(52,211,153,0.14)",
                                   color: "var(--sc-ok-fg)",
-                                  fontSize: 10.5,
+                                  fontSize: 12,
                                   fontWeight: 800,
                                   cursor: busy ? "wait" : "pointer",
                                 }}
@@ -2205,7 +1860,7 @@ export default function Home({
                                   border: "1px solid rgba(244,63,94,0.45)",
                                   background: "rgba(244,63,94,0.10)",
                                   color: "var(--sc-danger-fg)",
-                                  fontSize: 10.5,
+                                  fontSize: 12,
                                   fontWeight: 800,
                                   cursor: busy ? "wait" : "pointer",
                                 }}
@@ -2235,7 +1890,7 @@ export default function Home({
                 </div>
                 <div
                   style={{
-                    fontSize: 11.5,
+                    fontSize: 12,
                     color: "var(--fg-muted)",
                     marginTop: 4,
                     lineHeight: 1.5,
@@ -2303,19 +1958,22 @@ const busy = busyConfirmKey === rowKey;
                             "border-color 0.15s ease, opacity 0.15s ease",
                         }}
                       >
-                    {other.imageUrl ? (
-                      <img
-                        src={other.imageUrl}
-                        alt={other.title || "รูปสิ่งของ"}
-                        style={{
-                          width: 44,
-                          height: 44,
-                          borderRadius: 10,
-                          objectFit: "cover",
-                          flexShrink: 0,
-                          background: "var(--bg-card)",
-                        }}
-                      />
+                    {getPostCover(other) ? (
+                      <div style={{ position: "relative", width: 44, height: 44, flexShrink: 0 }}>
+                        <img
+                          src={getPostCover(other) || undefined}
+                          alt={other.title || "รูปสิ่งของ"}
+                          style={{
+                            width: 44,
+                            height: 44,
+                            borderRadius: 10,
+                            objectFit: "cover",
+                            flexShrink: 0,
+                            background: "var(--bg-card)",
+                          }}
+                        />
+                        <ImageCountBadge post={other} size="sm" />
+                      </div>
                     ) : (
                       <div
                         style={{
@@ -2341,7 +1999,7 @@ const busy = busyConfirmKey === rowKey;
                     <div style={{ flex: 1, minWidth: 0 }}>
                       <div
                         style={{
-                          fontSize: 10.5,
+                          fontSize: 12,
                           fontWeight: 700,
                           color: "var(--sc-warn-fg)",
                           whiteSpace: "nowrap",
@@ -2365,7 +2023,7 @@ const busy = busyConfirmKey === rowKey;
                       </div>
                       <div
                         style={{
-                          fontSize: 11,
+                          fontSize: 12,
                           color: "var(--fg-muted)",
                           marginTop: 1,
                           whiteSpace: "nowrap",
@@ -2378,7 +2036,7 @@ const busy = busyConfirmKey === rowKey;
                       {row.reason && (
                         <div
                           style={{
-                            fontSize: 10.5,
+                            fontSize: 12,
                             color: "var(--fg-faint)",
                             marginTop: 2,
                             lineHeight: 1.4,
@@ -2391,7 +2049,7 @@ const busy = busyConfirmKey === rowKey;
                     <div style={{ flexShrink: 0, display: "flex", flexDirection: "column", alignItems: "flex-end", gap: 3 }}>
                       <span
                         style={{
-                          fontSize: 9,
+                          fontSize: 12,
                           fontWeight: 800,
                           letterSpacing: "0.4px",
                           color: row.confirmed ? "var(--sc-ok-fg)" : "var(--sc-warn-fg)",
@@ -2414,7 +2072,7 @@ const busy = busyConfirmKey === rowKey;
                           display: "inline-flex",
                           alignItems: "center",
                           gap: 4,
-                          fontSize: 11.5,
+                          fontSize: 12,
                           fontWeight: 800,
                           background: row.confirmed
                             ? "rgba(52,211,153,0.10)"
@@ -2450,7 +2108,7 @@ const busy = busyConfirmKey === rowKey;
                               border: "1px solid rgba(52,211,153,0.45)",
                               background: "rgba(52,211,153,0.14)",
                               color: "var(--sc-ok-fg)",
-                              fontSize: 10.5,
+                              fontSize: 12,
                               fontWeight: 800,
                               cursor: busy ? "wait" : "pointer",
                             }}
@@ -2475,7 +2133,7 @@ const busy = busyConfirmKey === rowKey;
                               border: "1px solid rgba(244,63,94,0.45)",
                               background: "rgba(244,63,94,0.10)",
                               color: "var(--sc-danger-fg)",
-                              fontSize: 10.5,
+                              fontSize: 12,
                               fontWeight: 800,
                               cursor: busy ? "wait" : "pointer",
                             }}
@@ -2746,10 +2404,10 @@ const busy = busyConfirmKey === rowKey;
                     boxShadow: "0 4px 20px rgba(0,0,0,0.3)",
                   }}
                 >
-                  {post.imageUrl && (
+                  {getPostCover(post) && (
                     <div style={{ position: "relative", width: "100%" }}>
                       <img
-                        src={post.imageUrl}
+                        src={getPostCover(post) || undefined}
                         alt={post.title}
                         style={{
                           width: "100%",
@@ -2772,6 +2430,7 @@ const busy = busyConfirmKey === rowKey;
                         {statusBadge(post)}
                         {matchChip}
                       </div>
+                      <ImageCountBadge post={post} />
                     </div>
                   )}
 
@@ -2784,7 +2443,7 @@ const busy = busyConfirmKey === rowKey;
                       gap: 8,
                     }}
                   >
-                    {!post.imageUrl && (
+                    {!getPostCover(post) && (
                       <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
                         {statusBadge(post)}
                         {matchChip}
@@ -2845,7 +2504,7 @@ const busy = busyConfirmKey === rowKey;
                           borderRadius: 6,
                           background: "var(--bg-hover)",
                           border: "1px solid var(--border)",
-                          fontSize: 11,
+                          fontSize: 12,
                           fontWeight: 600,
                           color: "var(--fg-accent)",
                         }}
@@ -2889,7 +2548,7 @@ const busy = busyConfirmKey === rowKey;
                           display: "flex",
                           alignItems: "center",
                           gap: 4,
-                          fontSize: 11,
+                          fontSize: 12,
                           color: "var(--fg-muted)",
                           minWidth: 0,
                         }}
@@ -2915,7 +2574,7 @@ const busy = busyConfirmKey === rowKey;
                               display: "inline-flex",
                               alignItems: "center",
                               gap: 4,
-                              fontSize: 10.5,
+                              fontSize: 12,
                               fontWeight: 700,
                               color: "var(--sc-brand-fg)",
                               background: "rgba(124,92,252,0.15)",
@@ -3034,245 +2693,179 @@ const busy = busyConfirmKey === rowKey;
       </main>
 
       {/* Modal / Dialog สำหรับเลือกอาคาร/คณะ */}
-      {isBuildingModalOpen && (
+      <Dialog
+        open={isBuildingModalOpen}
+        onClose={() => setIsBuildingModalOpen(false)}
+        title="เลือกคณะ / อาคาร / พื้นที่"
+        subtitle="กรองรายการทรัพย์สินเฉพาะจุด"
+        icon={Building2}
+        iconTone="primary"
+        align="start"
+        maxWidth={520}
+      >
         <div
           style={{
-            position: "fixed",
-            top: 0,
-            left: 0,
-            right: 0,
-            bottom: 0,
-            backgroundColor: "rgba(5, 4, 10, 0.72)",
-            backdropFilter: "blur(6px)",
-            zIndex: 100,
             display: "flex",
-            justifyContent: "center",
             alignItems: "center",
-            padding: 20,
+            border: "1px solid var(--border)",
+            borderRadius: 10,
+            padding: "0 10px",
+            marginBottom: 12,
+            backgroundColor: "var(--bg-subtle)",
+            minHeight: 46,
           }}
-          onClick={() => setIsBuildingModalOpen(false)}
         >
-          <div
+          <Search size={16} color="#7c5cfc" style={{ flexShrink: 0 }} />
+          <input
+            type="text"
+            placeholder="พิมพ์ชื่อคณะ หรือ อาคาร..."
+            value={buildingSearchText}
+            onChange={(e) => setBuildingSearchText(e.target.value)}
             style={{
-              backgroundColor: "var(--bg-card)",
-              width: "100%",
-              maxWidth: 520,
-              maxHeight: "82vh",
-              borderRadius: 14,
-              border: "1px solid var(--border)",
-              padding: 18,
-              display: "flex",
-              flexDirection: "column",
-              boxShadow: "0 24px 60px rgba(0, 0, 0, 0.6), 0 0 40px rgba(124,92,252,0.12)",
-              animation: "fadeIn 0.15s ease-out",
+              border: "none",
+              background: "transparent",
+              outline: "none",
+              marginLeft: 8,
+              flex: 1,
+              minWidth: 0,
+              minHeight: 44,
+              fontSize: 14,
+              color: "var(--fg)",
             }}
-            onClick={(e) => e.stopPropagation()}
-          >
-            <div
+          />
+          {buildingSearchText && (
+            <button
+              type="button"
+              aria-label="ล้างคำค้น"
+              onClick={() => setBuildingSearchText("")}
               style={{
-                display: "flex",
-                justifyContent: "space-between",
-                alignItems: "center",
-                marginBottom: 14,
+                background: "none", border: "none", cursor: "pointer",
+                width: 34, height: 34, display: "flex", alignItems: "center", justifyContent: "center",
               }}
             >
-              <div>
-                <div style={{ fontSize: 14, fontWeight: 700, color: "var(--fg)" }}>
-                  เลือกคณะ / อาคาร / พื้นที่
-                </div>
-                <div style={{ fontSize: 12, color: "var(--fg-muted)", marginTop: 2 }}>
-                  กรองรายการทรัพย์สินเฉพาะจุด
-                </div>
-              </div>
-              <button
-                onClick={() => setIsBuildingModalOpen(false)}
-                aria-label="ปิด"
-                className="vc-btn"
-                style={{ width: 30, height: 30, padding: 0 }}
-              >
-                <X size={15} />
-              </button>
-            </div>
-
-            <div
-              style={{
-                display: "flex",
-                alignItems: "center",
-                border: "1px solid var(--border)",
-                borderRadius: 10,
-                padding: "0 10px",
-                marginBottom: 12,
-                backgroundColor: "var(--bg-subtle)",
-                height: 34,
-              }}
-            >
-              <Search size={15} color="#7c5cfc" />
-              <input
-                type="text"
-                placeholder="พิมพ์ชื่อคณะ หรือ อาคาร..."
-                value={buildingSearchText}
-                onChange={(e) => setBuildingSearchText(e.target.value)}
-                style={{
-                  border: "none",
-                  background: "transparent",
-                  outline: "none",
-                  marginLeft: 8,
-                  flex: 1,
-                  fontSize: 13,
-                  color: "var(--fg)",
-                }}
-              />
-              {buildingSearchText && (
-                <button
-                  onClick={() => setBuildingSearchText("")}
-                  style={{ background: "none", border: "none", cursor: "pointer", padding: 0 }}
-                >
-                  <X size={14} color="var(--fg-muted)" />
-                </button>
-              )}
-            </div>
-
-            <div
-              style={{
-                overflowY: "auto",
-                maxHeight: "48vh",
-                display: "flex",
-                flexDirection: "column",
-                gap: 4,
-                scrollbarWidth: "none",
-              }}
-            >
-              {filteredBuildings.length === 0 ? (
-                <div style={{ textAlign: "center", padding: "30px 0", color: "var(--fg-muted)", fontSize: 13 }}>
-                  ไม่พบสถานที่ที่ค้นหา
-                </div>
-              ) : (
-                filteredBuildings.map((building) => {
-                  const isSelected = selectedBuilding === building;
-                  return (
-                    <button
-                      key={building}
-                      onClick={() => {
-                        setPage(1);
-                        setSelectedBuilding(building);
-                        setIsBuildingModalOpen(false);
-                      }}
-                      style={{
-                        display: "flex",
-                        alignItems: "center",
-                        justifyContent: "space-between",
-                        gap: 8,
-                        backgroundColor: isSelected ? "rgba(124,92,252,0.14)" : "var(--bg-card)",
-                        color: isSelected ? "var(--fg)" : "var(--fg-accent)",
-                        border: isSelected ? "1px solid rgba(124,92,252,0.5)" : "1px solid var(--border)",
-                        padding: "9px 12px",
-                        borderRadius: 10,
-                        fontSize: 13,
-                        fontWeight: isSelected ? 700 : 500,
-                        textAlign: "left",
-                        cursor: "pointer",
-                        width: "100%",
-                        transition: "background 0.12s ease",
-                      }}
-                    >
-                      <div
-                        style={{
-                          display: "flex",
-                          alignItems: "center",
-                          gap: 8,
-                          minWidth: 0,
-                        }}
-                      >
-                        <Building2 size={14} color={isSelected ? "#7c5cfc" : "var(--fg-faint)"} style={{ flexShrink: 0 }} />
-                        <span style={{ whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
-                          {building}
-                        </span>
-                      </div>
-                      {isSelected && <CheckCircle2 size={15} color="#7c5cfc" style={{ flexShrink: 0 }} />}
-                    </button>
-                  );
-                })
-              )}
-            </div>
-          </div>
+              <X size={15} color="var(--fg-muted)" />
+            </button>
+          )}
         </div>
-      )}
+
+        <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+          {filteredBuildings.length === 0 ? (
+            <div style={{ textAlign: "center", padding: "30px 0", color: "var(--fg-muted)", fontSize: 14 }}>
+              ไม่พบสถานที่ที่ค้นหา
+            </div>
+          ) : (
+            filteredBuildings.map((building) => {
+              const isSelected = selectedBuilding === building;
+              return (
+                <button
+                  key={building}
+                  type="button"
+                  onClick={() => {
+                    setPage(1);
+                    setSelectedBuilding(building);
+                    setIsBuildingModalOpen(false);
+                  }}
+                  style={{
+                    display: "flex",
+                    alignItems: "center",
+                    justifyContent: "space-between",
+                    gap: 8,
+                    minHeight: 46,
+                    backgroundColor: isSelected ? "rgba(124,92,252,0.14)" : "var(--bg-card)",
+                    color: isSelected ? "var(--fg)" : "var(--fg-accent)",
+                    border: isSelected ? "1px solid rgba(124,92,252,0.5)" : "1px solid var(--border)",
+                    padding: "9px 12px",
+                    borderRadius: 10,
+                    fontSize: 14,
+                    fontWeight: isSelected ? 700 : 500,
+                    textAlign: "left",
+                    cursor: "pointer",
+                    width: "100%",
+                    transition: "background 0.12s ease",
+                  }}
+                >
+                  <div style={{ display: "flex", alignItems: "center", gap: 8, minWidth: 0 }}>
+                    <Building2 size={15} color={isSelected ? "#7c5cfc" : "var(--fg-faint)"} style={{ flexShrink: 0 }} />
+                    <span style={{ whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
+                      {building}
+                    </span>
+                  </div>
+                  {isSelected && <CheckCircle2 size={16} color="#7c5cfc" style={{ flexShrink: 0 }} />}
+                </button>
+              );
+            })
+          )}
+        </div>
+      </Dialog>
 
       {/* Modal / Dialog สำหรับเลือกหมวดหมู่ */}
-      {isCategoryModalOpen && (
-        <div
-          style={{
-            position: "fixed",
-            top: 0,
-            left: 0,
-            right: 0,
-            bottom: 0,
-            backgroundColor: "rgba(5, 4, 10, 0.72)",
-            backdropFilter: "blur(6px)",
-            zIndex: 100,
-            display: "flex",
-            justifyContent: "center",
-            alignItems: "center",
-            padding: 20,
-          }}
-          onClick={() => setIsCategoryModalOpen(false)}
-        >
-          <div
-            style={{
-              backgroundColor: "var(--bg-card)",
-              width: "100%",
-              maxWidth: 520,
-              maxHeight: "82vh",
-              borderRadius: 14,
-              border: "1px solid var(--border)",
-              padding: 18,
-              display: "flex",
-              flexDirection: "column",
-              boxShadow: "0 24px 60px rgba(0, 0, 0, 0.6), 0 0 40px rgba(124,92,252,0.12)",
-              animation: "fadeIn 0.15s ease-out",
+      <Dialog
+        open={isCategoryModalOpen}
+        onClose={() => setIsCategoryModalOpen(false)}
+        title="เลือกหมวดหมู่สิ่งของ"
+        subtitle="กรองรายการตามหมวดหมู่ที่แจ้ง"
+        icon={Package}
+        iconTone="primary"
+        align="start"
+        maxWidth={520}
+      >
+        <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+          <button
+            type="button"
+            onClick={() => {
+              setPage(1);
+              setSelectedCategory("all");
+              setIsCategoryModalOpen(false);
             }}
-            onClick={(e) => e.stopPropagation()}
+            style={{
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "space-between",
+              gap: 8,
+              minHeight: 46,
+              backgroundColor:
+                selectedCategory === "all" ? "rgba(124,92,252,0.14)" : "var(--bg-card)",
+              color: selectedCategory === "all" ? "var(--fg)" : "var(--fg-accent)",
+              border:
+                selectedCategory === "all"
+                  ? "1px solid rgba(124,92,252,0.5)"
+                  : "1px solid var(--border)",
+              padding: "9px 12px",
+              borderRadius: 10,
+              fontSize: 14,
+              fontWeight: selectedCategory === "all" ? 700 : 500,
+              textAlign: "left",
+              cursor: "pointer",
+              width: "100%",
+              transition: "background 0.12s ease",
+            }}
           >
-            <div
-              style={{
-                display: "flex",
-                justifyContent: "space-between",
-                alignItems: "center",
-                marginBottom: 14,
-              }}
-            >
-              <div>
-                <div style={{ fontSize: 14, fontWeight: 700, color: "var(--fg)" }}>
-                  เลือกหมวดหมู่สิ่งของ
-                </div>
-                <div style={{ fontSize: 12, color: "var(--fg-muted)", marginTop: 2 }}>
-                  กรองรายการตามหมวดหมู่ที่แจ้ง
-                </div>
-              </div>
-              <button
-                onClick={() => setIsCategoryModalOpen(false)}
-                aria-label="ปิด"
-                className="vc-btn"
-                style={{ width: 30, height: 30, padding: 0 }}
-              >
-                <X size={15} />
-              </button>
+            <div style={{ display: "flex", alignItems: "center", gap: 8, minWidth: 0 }}>
+              <Package size={15} color={selectedCategory === "all" ? "#7c5cfc" : "var(--fg-faint)"} style={{ flexShrink: 0 }} />
+              <span style={{ whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
+                ทุกหมวดหมู่
+              </span>
             </div>
+            <div style={{ display: "flex", alignItems: "center", gap: 6, flexShrink: 0 }}>
+              <span style={{ fontSize: 12, color: "var(--fg-muted)" }}>
+                {posts.length} รายการ
+              </span>
+              {selectedCategory === "all" && <CheckCircle2 size={16} color="#7c5cfc" style={{ flexShrink: 0 }} />}
+            </div>
+          </button>
 
-            <div
-              style={{
-                overflowY: "auto",
-                maxHeight: "56vh",
-                display: "flex",
-                flexDirection: "column",
-                gap: 4,
-                scrollbarWidth: "none",
-              }}
-            >
+          {ITEM_CATEGORIES.map((cat) => {
+            const isSelected = selectedCategory === cat;
+            const count = posts.filter(
+              (p) => (p.category || "อื่นๆ").toLowerCase() === cat.toLowerCase()
+            ).length;
+            return (
               <button
+                key={cat}
+                type="button"
                 onClick={() => {
                   setPage(1);
-                  setSelectedCategory("all");
+                  setSelectedCategory(cat);
                   setIsCategoryModalOpen(false);
                 }}
                 style={{
@@ -3280,17 +2873,14 @@ const busy = busyConfirmKey === rowKey;
                   alignItems: "center",
                   justifyContent: "space-between",
                   gap: 8,
-                  backgroundColor:
-                    selectedCategory === "all" ? "rgba(124,92,252,0.14)" : "var(--bg-card)",
-                  color: selectedCategory === "all" ? "var(--fg)" : "var(--fg-accent)",
-                  border:
-                    selectedCategory === "all"
-                      ? "1px solid rgba(124,92,252,0.5)"
-                      : "1px solid var(--border)",
+                  minHeight: 46,
+                  backgroundColor: isSelected ? "rgba(124,92,252,0.14)" : "var(--bg-card)",
+                  color: isSelected ? "var(--fg)" : "var(--fg-accent)",
+                  border: isSelected ? "1px solid rgba(124,92,252,0.5)" : "1px solid var(--border)",
                   padding: "9px 12px",
                   borderRadius: 10,
-                  fontSize: 13,
-                  fontWeight: selectedCategory === "all" ? 700 : 500,
+                  fontSize: 14,
+                  fontWeight: isSelected ? 700 : 500,
                   textAlign: "left",
                   cursor: "pointer",
                   width: "100%",
@@ -3298,216 +2888,117 @@ const busy = busyConfirmKey === rowKey;
                 }}
               >
                 <div style={{ display: "flex", alignItems: "center", gap: 8, minWidth: 0 }}>
-                  <Package size={14} color={selectedCategory === "all" ? "#7c5cfc" : "var(--fg-faint)"} style={{ flexShrink: 0 }} />
+                  <Package size={15} color={isSelected ? "#7c5cfc" : "var(--fg-faint)"} style={{ flexShrink: 0 }} />
                   <span style={{ whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
-                    ทุกหมวดหมู่
+                    {cat}
                   </span>
                 </div>
-                <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
-                  <span style={{ fontSize: 11, color: "var(--fg-muted)" }}>
-                    {posts.length} รายการ
+                <div style={{ display: "flex", alignItems: "center", gap: 6, flexShrink: 0 }}>
+                  <span style={{ fontSize: 12, color: "var(--fg-muted)" }}>
+                    {count} รายการ
                   </span>
-                  {selectedCategory === "all" && <CheckCircle2 size={15} color="#7c5cfc" style={{ flexShrink: 0 }} />}
+                  {isSelected && <CheckCircle2 size={16} color="#7c5cfc" style={{ flexShrink: 0 }} />}
                 </div>
               </button>
-
-              {ITEM_CATEGORIES.map((cat) => {
-                const isSelected = selectedCategory === cat;
-                const count = posts.filter(
-                  (p) => (p.category || "อื่นๆ").toLowerCase() === cat.toLowerCase()
-                ).length;
-                return (
-                  <button
-                    key={cat}
-                    onClick={() => {
-                      setPage(1);
-                      setSelectedCategory(cat);
-                      setIsCategoryModalOpen(false);
-                    }}
-                    style={{
-                      display: "flex",
-                      alignItems: "center",
-                      justifyContent: "space-between",
-                      gap: 8,
-                      backgroundColor: isSelected ? "rgba(124,92,252,0.14)" : "var(--bg-card)",
-                      color: isSelected ? "var(--fg)" : "var(--fg-accent)",
-                      border: isSelected ? "1px solid rgba(124,92,252,0.5)" : "1px solid var(--border)",
-                      padding: "9px 12px",
-                      borderRadius: 10,
-                      fontSize: 13,
-                      fontWeight: isSelected ? 700 : 500,
-                      textAlign: "left",
-                      cursor: "pointer",
-                      width: "100%",
-                      transition: "background 0.12s ease",
-                    }}
-                  >
-                    <div style={{ display: "flex", alignItems: "center", gap: 8, minWidth: 0 }}>
-                      <Package size={14} color={isSelected ? "#7c5cfc" : "var(--fg-faint)"} style={{ flexShrink: 0 }} />
-                      <span style={{ whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
-                        {cat}
-                      </span>
-                    </div>
-                    <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
-                      <span style={{ fontSize: 11, color: "var(--fg-muted)" }}>
-                        {count} รายการ
-                      </span>
-                      {isSelected && <CheckCircle2 size={15} color="#7c5cfc" style={{ flexShrink: 0 }} />}
-                    </div>
-                  </button>
-                );
-              })}
-            </div>
-          </div>
+            );
+          })}
         </div>
-      )}
+      </Dialog>
 
-      {/* ==================== Report Post Modal ==================== */}
-      {reportPostData && (
-        <div
-          style={{
-            position: "fixed",
-            inset: 0,
-            backgroundColor: "rgba(5,4,10,0.72)",
-            backdropFilter: "blur(6px)",
-            zIndex: 9999,
-            display: "flex",
-            alignItems: "center",
-            justifyContent: "center",
-            padding: 20,
-            animation: "fadeIn 0.18s ease-out",
-          }}
-          onClick={() => {
-            setReportPostData(null);
-            setReportDetail("");
-            setReportCategory("เนื้อหาไม่เหมาะสม");
-          }}
-        >
-          <div
-            style={{
-              backgroundColor: "var(--bg-card)",
-              borderRadius: 16,
-              padding: 22,
-              maxWidth: 400,
-              width: "100%",
-              boxShadow: "0 24px 60px rgba(0,0,0,0.6), 0 0 50px rgba(248,113,113,0.1)",
-              border: "1px solid var(--border)",
-              animation: "fadeIn 0.18s ease-out",
-            }}
-            onClick={(e) => e.stopPropagation()}
-          >
-            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 14 }}>
-              <div style={{ display: "flex", alignItems: "center", gap: 8, color: "var(--sc-danger-fg)", fontWeight: 800, fontSize: 15 }}>
-                <Flag size={18} />
-                รายงานโพสต์
-              </div>
-              <button
-                onClick={() => {
-                  setReportPostData(null);
-                  setReportDetail("");
-                  setReportCategory("เนื้อหาไม่เหมาะสม");
-                }}
-                style={{
-                  border: "none", background: "var(--bg-hover)", cursor: "pointer",
-                  color: "var(--fg-secondary)", borderRadius: "50%", width: 28, height: 28,
-                  display: "flex", alignItems: "center", justifyContent: "center",
-                }}
-              >
-                <X size={15} />
-              </button>
-            </div>
+      {/* ==================== Report Post Dialog ==================== */}
+      <Dialog
+        open={Boolean(reportPostData)}
+        onClose={() => {
+          setReportPostData(null);
+          setReportDetail("");
+          setReportCategory("เนื้อหาไม่เหมาะสม");
+        }}
+        title="รายงานโพสต์"
+        icon={Flag}
+        iconTone="danger"
+        align="start"
+        maxWidth={440}
+        zIndex={9999}
+        footer={
+          <>
+            <DialogButton
+              onClick={() => {
+                setReportPostData(null);
+                setReportDetail("");
+                setReportCategory("เนื้อหาไม่เหมาะสม");
+              }}
+            >
+              ยกเลิก
+            </DialogButton>
+            <DialogButton
+              type="submit"
+              formId="report-post-form"
+              tone="danger"
+              icon={Send}
+              disabled={isSubmittingReport}
+            >
+              {isSubmittingReport ? "กำลังส่ง..." : "ส่งรายงาน"}
+            </DialogButton>
+          </>
+        }
+      >
+        {/* ชื่อโพสต์ที่รายงาน */}
+        <div style={{
+          padding: "10px 12px", borderRadius: 10,
+          backgroundColor: "var(--bg-subtle)", border: "1px solid var(--border)",
+          marginBottom: 14, fontSize: 13.5, fontWeight: 600, color: "var(--fg)",
+        }}>
+          {reportPostData?.title}
+        </div>
 
-            {/* ชื่อโพสต์ที่รายงาน */}
-            <div style={{
-              padding: "8px 12px", borderRadius: 8,
-              backgroundColor: "var(--bg-subtle)", border: "1px solid var(--border)",
-              marginBottom: 14, fontSize: 12.5, fontWeight: 600, color: "var(--fg)",
-            }}>
-              {reportPostData.title}
-            </div>
-
-            <form onSubmit={handleReportPost}>
-              {/* เลือกหมวดหมู่ */}
-              <div style={{ marginBottom: 12 }}>
-                <label style={{ display: "block", fontSize: 11.5, fontWeight: 700, color: "var(--fg-muted)", marginBottom: 6 }}>
-                  หมวดหมู่รายงาน *
-                </label>
-                <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
-                  {REPORT_CATEGORIES.map((cat) => (
-                    <button
-                      key={cat}
-                      type="button"
-                      onClick={() => setReportCategory(cat)}
-                      style={{
-                        padding: "5px 10px", borderRadius: 8, fontSize: 11, fontWeight: 600,
-                        border: "1px solid",
-                        borderColor: reportCategory === cat ? "var(--sc-danger-fg)" : "var(--border)",
-                        background: reportCategory === cat ? "rgba(248,113,113,0.12)" : "var(--bg-card)",
-                        color: reportCategory === cat ? "var(--sc-danger-fg)" : "var(--fg-muted)",
-                        cursor: "pointer",
-                      }}
-                    >
-                      {cat}
-                    </button>
-                  ))}
-                </div>
-              </div>
-
-              {/* รายละเอียด */}
-              <div style={{ marginBottom: 16 }}>
-                <label style={{ display: "block", fontSize: 11.5, fontWeight: 700, color: "var(--fg-muted)", marginBottom: 6 }}>
-                  รายละเอียดเพิ่มเติม (ถ้ามี)
-                </label>
-                <textarea
-                  rows={3}
-                  value={reportDetail}
-                  onChange={(e) => setReportDetail(e.target.value)}
-                  placeholder="อธิบายปัญหาที่พบ..."
-                  style={{
-                    width: "100%", padding: "10px 12px", borderRadius: 10,
-                    border: "1.5px solid var(--border)", fontSize: 12, outline: "none",
-                    boxSizing: "border-box", fontFamily: "inherit", resize: "none",
-                    backgroundColor: "var(--bg-subtle)", color: "var(--fg)",
-                  }}
-                />
-              </div>
-
-              {/* ปุ่ม */}
-              <div style={{ display: "flex", gap: 10 }}>
+        <form id="report-post-form" onSubmit={handleReportPost}>
+          {/* เลือกหมวดหมู่ */}
+          <div style={{ marginBottom: 14 }}>
+            <label style={{ display: "block", fontSize: 12.5, fontWeight: 700, color: "var(--fg-muted)", marginBottom: 8 }}>
+              หมวดหมู่รายงาน *
+            </label>
+            <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
+              {REPORT_CATEGORIES.map((cat) => (
                 <button
+                  key={cat}
                   type="button"
-                  onClick={() => {
-                    setReportPostData(null);
-                    setReportDetail("");
-                    setReportCategory("เนื้อหาไม่เหมาะสม");
-                  }}
+                  onClick={() => setReportCategory(cat)}
                   style={{
-                    flex: 1, padding: "10px", borderRadius: 10,
-                    border: "1px solid var(--border)", backgroundColor: "var(--bg-subtle)",
-                    color: "var(--fg-secondary)", fontSize: 13, fontWeight: 700, cursor: "pointer",
+                    padding: "8px 12px", borderRadius: 8, fontSize: 12.5, fontWeight: 600,
+                    minHeight: 40, display: "flex", alignItems: "center",
+                    border: "1px solid",
+                    borderColor: reportCategory === cat ? "var(--sc-danger-fg)" : "var(--border)",
+                    background: reportCategory === cat ? "rgba(248,113,113,0.12)" : "var(--bg-card)",
+                    color: reportCategory === cat ? "var(--sc-danger-fg)" : "var(--fg-muted)",
+                    cursor: "pointer",
                   }}
                 >
-                  ยกเลิก
+                  {cat}
                 </button>
-                <button
-                  type="submit"
-                  disabled={isSubmittingReport}
-                  style={{
-                    flex: 1, padding: "10px", borderRadius: 10, border: "none",
-                    backgroundColor: "#dc2626", color: "#fff",
-                    fontSize: 13, fontWeight: 700, cursor: isSubmittingReport ? "not-allowed" : "pointer",
-                    display: "flex", alignItems: "center", justifyContent: "center", gap: 6,
-                    opacity: isSubmittingReport ? 0.7 : 1,
-                  }}
-                >
-                  <Send size={13} />
-                  {isSubmittingReport ? "กำลังส่ง..." : "ส่งรายงาน"}
-                </button>
-              </div>
-            </form>
+              ))}
+            </div>
           </div>
-        </div>
-      )}
+
+          {/* รายละเอียด */}
+          <div>
+            <label style={{ display: "block", fontSize: 12.5, fontWeight: 700, color: "var(--fg-muted)", marginBottom: 8 }}>
+              รายละเอียดเพิ่มเติม (ถ้ามี)
+            </label>
+            <textarea
+              rows={3}
+              value={reportDetail}
+              onChange={(e) => setReportDetail(e.target.value)}
+              placeholder="อธิบายปัญหาที่พบ..."
+              style={{
+                width: "100%", padding: "10px 12px", borderRadius: 10,
+                border: "1.5px solid var(--border)", fontSize: 14, outline: "none",
+                boxSizing: "border-box", fontFamily: "inherit", resize: "none",
+                backgroundColor: "var(--bg-subtle)", color: "var(--fg)",
+              }}
+            />
+          </div>
+        </form>
+      </Dialog>
 
       <ToastContainer />
     </div>

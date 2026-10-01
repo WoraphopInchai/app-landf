@@ -103,7 +103,7 @@ export default function BottomNav({
                       borderRadius: 999,
                       backgroundColor: "#ef4444",
                       color: "#ffffff",
-                      fontSize: 10,
+                      fontSize: 12,
                       fontWeight: 800,
                       lineHeight: "17px",
                       textAlign: "center",
@@ -119,7 +119,7 @@ export default function BottomNav({
 
             <span
               style={{
-                fontSize: 11,
+                fontSize: 12,
                 fontWeight: active ? 700 : 500,
                 color: isReport ? "var(--fg)" : active ? "#7c5cfc" : "var(--fg-faint)",
                 marginTop: isReport ? -8 : 3, // ปรับระยะห่างตัวหนังสือของปุ่มแจ้งของให้พอดี

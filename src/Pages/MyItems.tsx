@@ -12,6 +12,7 @@ import {
   ExternalLink,
   ClipboardCheck,
   CheckCircle2,
+  Link2,
 } from "lucide-react";
 import {
   collection,
@@ -26,6 +27,8 @@ import type { AppUser, PostItem, FirestoreTimeLike } from "../types";
 import { confirmAiPair, runForceRescan } from "../lib/aiMatch";
 import ToastContainer from "../components/Toast";
 import { showToast } from "../lib/toast";
+import { getPostCover } from "../lib/postImages";
+import ImageCountBadge from "../components/ImageCountBadge";
 
 interface MyItemsProps {
   user: AppUser;
@@ -49,6 +52,9 @@ interface ClaimDoc {
   status?: string;
   note?: string;
   rejectReason?: string;
+  // โพสต์ของหายของผู้ใช้เองที่ผูกไว้ตอนขอรับของ
+  matchedPostId?: string | null;
+  matchedPostTitle?: string | null;
   createdAt?: FirestoreTimeLike;
   reviewedAt?: FirestoreTimeLike;
   expiresAt?: string;
@@ -756,7 +762,7 @@ export default function MyItems({
               maxWidth: 640,
               margin: "0 auto",
               marginTop: 6,
-              fontSize: 10.5,
+              fontSize: 12,
               fontWeight: 600,
               color: "var(--fg-muted)",
             }}
@@ -837,7 +843,7 @@ export default function MyItems({
                   )}
                 </div>
                 {(externalConfirmedMatches.length > 0 && externalSuggestedMatches.length > 0) && (
-                  <div style={{ fontSize: 10.5, fontWeight: 600, color: "var(--fg-faint)" }}>
+                  <div style={{ fontSize: 12, fontWeight: 600, color: "var(--fg-faint)" }}>
                     <span style={{ color: "var(--sc-ok-fg)" }}>{externalConfirmedMatches.length} แมทจริง</span>
                     {" · "}
                     <span style={{ color: "var(--sc-warn-fg)" }}>{externalSuggestedMatches.length} คู่ที่แนะนำ</span>
@@ -871,10 +877,10 @@ export default function MyItems({
                       animation: `itemIn 0.3s ease ${(index % 12) * 35}ms both`,
                     }}
                   >
-                    {post.imageUrl && (
+                    {getPostCover(post) && (
                       <div style={{ position: "relative", width: "100%" }}>
                         <img
-                          src={post.imageUrl}
+                          src={getPostCover(post) || undefined}
                           alt={post.title || "สิ่งของ"}
                           style={{
                             width: "100%",
@@ -884,6 +890,7 @@ export default function MyItems({
                             backgroundColor: "var(--bg-subtle)",
                           }}
                         />
+                        <ImageCountBadge post={post} />
                         <div
                           style={{
                             position: "absolute",
@@ -903,7 +910,7 @@ export default function MyItems({
                               border: `1px solid ${info.border}`,
                               padding: "3px 10px",
                               borderRadius: 999,
-                              fontSize: 11,
+                              fontSize: 12,
                               fontWeight: 800,
                               boxShadow: "0 2px 10px rgba(0,0,0,0.4)",
                               backdropFilter: "blur(6px)",
@@ -927,7 +934,7 @@ export default function MyItems({
                                 : "1px solid rgba(251,191,36,0.5)",
                               padding: "2px 8px",
                               borderRadius: 999,
-                              fontSize: 10,
+                              fontSize: 12,
                               fontWeight: 800,
                             }}
                           >
@@ -947,7 +954,7 @@ export default function MyItems({
                         gap: 8,
                       }}
                     >
-                      {!post.imageUrl && (
+                      {!getPostCover(post) && (
                         <div
                           style={{
                             display: "flex",
@@ -965,7 +972,7 @@ export default function MyItems({
                               border: `1px solid ${info.border}`,
                               padding: "3px 10px",
                               borderRadius: 999,
-                              fontSize: 11,
+                              fontSize: 12,
                               fontWeight: 800,
                             }}
                           >
@@ -985,7 +992,7 @@ export default function MyItems({
                                 : "1px solid rgba(251,191,36,0.5)",
                               padding: "2px 8px",
                               borderRadius: 999,
-                              fontSize: 10,
+                              fontSize: 12,
                               fontWeight: 800,
                             }}
                           >
@@ -1021,7 +1028,7 @@ export default function MyItems({
                           borderRadius: 8,
                           background: "rgba(124,92,252,0.08)",
                           border: "1px solid rgba(124,92,252,0.2)",
-                          fontSize: 11.5,
+                          fontSize: 12,
                           color: "var(--fg-accent)",
                           fontWeight: 600,
                         }}
@@ -1076,7 +1083,7 @@ export default function MyItems({
                             borderRadius: 6,
                             background: "var(--bg-hover)",
                             border: "1px solid var(--border)",
-                            fontSize: 11,
+                            fontSize: 12,
                             fontWeight: 600,
                             color: "var(--fg-accent)",
                           }}
@@ -1132,7 +1139,7 @@ export default function MyItems({
                             display: "flex",
                             alignItems: "center",
                             gap: 4,
-                            fontSize: 11,
+                            fontSize: 12,
                             color: "var(--fg-muted)",
                             minWidth: 0,
                           }}
@@ -1156,7 +1163,7 @@ export default function MyItems({
                         {em.reason && (
                           <span
                             style={{
-                              fontSize: 10,
+                              fontSize: 12,
                               color: "var(--fg-faint)",
                               maxWidth: 140,
                               whiteSpace: "nowrap",
@@ -1223,10 +1230,10 @@ export default function MyItems({
                       animation: `itemIn 0.3s ease ${(index % 12) * 35}ms both`,
                     }}
                   >
-                    {post.imageUrl && (
+                    {getPostCover(post) && (
                       <div style={{ position: "relative", width: "100%" }}>
                         <img
-                          src={post.imageUrl}
+                          src={getPostCover(post) || undefined}
                           alt={post.title || "สิ่งของ"}
                           style={{
                             width: "100%",
@@ -1236,6 +1243,7 @@ export default function MyItems({
                             backgroundColor: "var(--bg-subtle)",
                           }}
                         />
+                        <ImageCountBadge post={post} />
                         <div
                           style={{
                             position: "absolute",
@@ -1255,7 +1263,7 @@ export default function MyItems({
                               border: `1px solid ${info.border}`,
                               padding: "3px 10px",
                               borderRadius: 999,
-                              fontSize: 11,
+                              fontSize: 12,
                               fontWeight: 800,
                               boxShadow: "0 2px 10px rgba(0,0,0,0.4)",
                               backdropFilter: "blur(6px)",
@@ -1274,7 +1282,7 @@ export default function MyItems({
                               border: "1px solid rgba(251,191,36,0.5)",
                               padding: "2px 8px",
                               borderRadius: 999,
-                              fontSize: 10,
+                              fontSize: 12,
                               fontWeight: 800,
                             }}
                           >
@@ -1294,7 +1302,7 @@ export default function MyItems({
                         gap: 8,
                       }}
                     >
-                      {!post.imageUrl && (
+                      {!getPostCover(post) && (
                         <div
                           style={{
                             display: "flex",
@@ -1312,7 +1320,7 @@ export default function MyItems({
                               border: `1px solid ${info.border}`,
                               padding: "3px 10px",
                               borderRadius: 999,
-                              fontSize: 11,
+                              fontSize: 12,
                               fontWeight: 800,
                             }}
                           >
@@ -1328,7 +1336,7 @@ export default function MyItems({
                               border: "1px solid rgba(251,191,36,0.5)",
                               padding: "2px 8px",
                               borderRadius: 999,
-                              fontSize: 10,
+                              fontSize: 12,
                               fontWeight: 800,
                             }}
                           >
@@ -1363,7 +1371,7 @@ export default function MyItems({
                           borderRadius: 8,
                           background: "rgba(124,92,252,0.08)",
                           border: "1px solid rgba(124,92,252,0.2)",
-                          fontSize: 11.5,
+                          fontSize: 12,
                           color: "var(--fg-accent)",
                           fontWeight: 600,
                         }}
@@ -1417,7 +1425,7 @@ export default function MyItems({
                             borderRadius: 6,
                             background: "var(--bg-hover)",
                             border: "1px solid var(--border)",
-                            fontSize: 11,
+                            fontSize: 12,
                             fontWeight: 600,
                             color: "var(--fg-accent)",
                           }}
@@ -1471,7 +1479,7 @@ export default function MyItems({
                             display: "flex",
                             alignItems: "center",
                             gap: 4,
-                            fontSize: 11,
+                            fontSize: 12,
                             color: "var(--fg-muted)",
                             minWidth: 0,
                             flex: 1,
@@ -1512,7 +1520,7 @@ export default function MyItems({
                               border: "1px solid rgba(52,211,153,0.5)",
                               background: "rgba(52,211,153,0.14)",
                               color: "var(--sc-ok-fg)",
-                              fontSize: 10.5,
+                              fontSize: 12,
                               fontWeight: 800,
                               cursor: busy ? "wait" : "pointer",
                             }}
@@ -1537,7 +1545,7 @@ export default function MyItems({
                               border: "1px solid rgba(244,63,94,0.5)",
                               background: "rgba(244,63,94,0.10)",
                               color: "var(--sc-danger-fg)",
-                              fontSize: 10.5,
+                              fontSize: 12,
                               fontWeight: 800,
                               cursor: busy ? "wait" : "pointer",
                             }}
@@ -1598,10 +1606,10 @@ export default function MyItems({
                           animation: `itemIn 0.3s ease ${(index % 12) * 35}ms both`,
                         }}
                       >
-                        {post.imageUrl && (
+                        {getPostCover(post) && (
                           <div style={{ position: "relative", width: "100%" }}>
                             <img
-                              src={post.imageUrl}
+                              src={getPostCover(post) || undefined}
                               alt={post.title || "สิ่งของ"}
                               style={{
                                 width: "100%",
@@ -1611,6 +1619,7 @@ export default function MyItems({
                                 backgroundColor: "var(--bg-subtle)",
                               }}
                             />
+                            <ImageCountBadge post={post} />
                             <div
                               style={{
                                 position: "absolute",
@@ -1630,7 +1639,7 @@ export default function MyItems({
                                   border: `1px solid ${info.border}`,
                                   padding: "3px 10px",
                                   borderRadius: 999,
-                                  fontSize: 11,
+                                  fontSize: 12,
                                   fontWeight: 800,
                                   boxShadow: "0 2px 10px rgba(0,0,0,0.4)",
                                   backdropFilter: "blur(6px)",
@@ -1649,7 +1658,7 @@ export default function MyItems({
                                   border: "1px solid rgba(251,191,36,0.5)",
                                   padding: "2px 8px",
                                   borderRadius: 999,
-                                  fontSize: 10,
+                                  fontSize: 12,
                                   fontWeight: 800,
                                 }}
                               >
@@ -1669,7 +1678,7 @@ export default function MyItems({
                             gap: 8,
                           }}
                         >
-                          {!post.imageUrl && (
+                          {!getPostCover(post) && (
                             <div
                               style={{
                                 display: "flex",
@@ -1687,7 +1696,7 @@ export default function MyItems({
                                   border: `1px solid ${info.border}`,
                                   padding: "3px 10px",
                                   borderRadius: 999,
-                                  fontSize: 11,
+                                  fontSize: 12,
                                   fontWeight: 800,
                                 }}
                               >
@@ -1703,7 +1712,7 @@ export default function MyItems({
                                   border: "1px solid rgba(251,191,36,0.5)",
                                   padding: "2px 8px",
                                   borderRadius: 999,
-                                  fontSize: 10,
+                                  fontSize: 12,
                                   fontWeight: 800,
                                 }}
                               >
@@ -1734,7 +1743,7 @@ export default function MyItems({
                               display: "flex",
                               alignItems: "center",
                               gap: 5,
-                              fontSize: 11.5,
+                              fontSize: 12,
                               fontWeight: 600,
                               color: "var(--sc-warn-fg)",
                             }}
@@ -1745,7 +1754,7 @@ export default function MyItems({
                           {em.reason && (
                             <div
                               style={{
-                                fontSize: 11,
+                                fontSize: 12,
                                 color: "var(--fg-faint)",
                                 lineHeight: 1.5,
                               }}
@@ -1773,7 +1782,7 @@ export default function MyItems({
                                 border: `1px solid ${info.border}`,
                                 padding: "3px 10px",
                                 borderRadius: 999,
-                                fontSize: 11,
+                                fontSize: 12,
                                 fontWeight: 800,
                               }}
                             >
@@ -1827,7 +1836,7 @@ export default function MyItems({
                                 display: "flex",
                                 alignItems: "center",
                                 gap: 4,
-                                fontSize: 11,
+                                fontSize: 12,
                                 color: "var(--fg-muted)",
                                 minWidth: 0,
                               }}
@@ -1858,7 +1867,7 @@ export default function MyItems({
                             >
                               <span
                                 style={{
-                                  fontSize: 9,
+                                  fontSize: 12,
                                   fontWeight: 800,
                                   letterSpacing: "0.4px",
                                   color: em.confirmed ? "var(--sc-ok-fg)" : "var(--sc-warn-fg)",
@@ -1901,7 +1910,7 @@ export default function MyItems({
                                       border: "1px solid rgba(52,211,153,0.5)",
                                       background: "rgba(52,211,153,0.14)",
                                       color: "var(--sc-ok-fg)",
-                                      fontSize: 10,
+                                      fontSize: 12,
                                       fontWeight: 800,
                                       cursor: "pointer",
                                     }}
@@ -1929,7 +1938,7 @@ export default function MyItems({
                                       border: "1px solid rgba(244,63,94,0.5)",
                                       background: "rgba(244,63,94,0.10)",
                                       color: "var(--sc-danger-fg)",
-                                      fontSize: 10,
+                                      fontSize: 12,
                                       fontWeight: 800,
                                       cursor: "pointer",
                                     }}
@@ -2052,7 +2061,7 @@ export default function MyItems({
                             border: `1px solid ${info.border}`,
                             padding: "2px 9px",
                             borderRadius: 999,
-                            fontSize: 11,
+                            fontSize: 12,
                             fontWeight: 800,
                           }}
                         >
@@ -2060,7 +2069,7 @@ export default function MyItems({
                         </span>
                         <span
                           style={{
-                            fontSize: 11,
+                            fontSize: 12,
                             color: "var(--fg-muted)",
                             fontWeight: 600,
                           }}
@@ -2073,7 +2082,7 @@ export default function MyItems({
                           display: "flex",
                           alignItems: "center",
                           gap: 4,
-                          fontSize: 11,
+                          fontSize: 12,
                           color: "var(--fg-faint)",
                           marginTop: 5,
                         }}
@@ -2081,6 +2090,35 @@ export default function MyItems({
                         <Clock size={11} />
                         ส่งคำขอเมื่อ {formatDate(claim.createdAt)}
                       </div>
+                      {claim.matchedPostTitle && (
+                        <div
+                          style={{
+                            display: "inline-flex",
+                            alignItems: "center",
+                            gap: 4,
+                            marginTop: 6,
+                            padding: "3px 8px",
+                            borderRadius: 999,
+                            fontSize: 11,
+                            fontWeight: 700,
+                            color: "var(--sc-ok-fg)",
+                            background: "var(--sc-ok-bg)",
+                            border: "1px solid var(--sc-ok-border)",
+                            maxWidth: "100%",
+                          }}
+                        >
+                          <Link2 size={11} style={{ flexShrink: 0 }} />
+                          <span
+                            style={{
+                              overflow: "hidden",
+                              textOverflow: "ellipsis",
+                              whiteSpace: "nowrap",
+                            }}
+                          >
+                            จับคู่กับ: {claim.matchedPostTitle}
+                          </span>
+                        </div>
+                      )}
                       {claim.note && (
                         <div
                           style={{
@@ -2131,7 +2169,7 @@ export default function MyItems({
                     border: `1px solid ${info.border}`,
                     padding: "3px 10px",
                     borderRadius: 999,
-                    fontSize: 11,
+                    fontSize: 12,
                     fontWeight: 800,
                     boxShadow: "0 2px 10px rgba(0,0,0,0.4)",
                     backdropFilter: "blur(6px)",
@@ -2153,7 +2191,7 @@ export default function MyItems({
                     border: "1px solid #4a3fae",
                     padding: "2px 8px",
                     borderRadius: 999,
-                    fontSize: 10,
+                    fontSize: 12,
                     fontWeight: 800,
                   }}
                 >
@@ -2178,10 +2216,10 @@ export default function MyItems({
                     animation: `itemIn 0.3s ease ${(index % 12) * 35}ms both`,
                   }}
                 >
-                  {item.imageUrl && (
+                    {getPostCover(item) && (
                     <div style={{ position: "relative", width: "100%" }}>
                       <img
-                        src={item.imageUrl}
+                        src={getPostCover(item) || undefined}
                         alt={item.title || "สิ่งของ"}
                         style={{
                           width: "100%",
@@ -2191,6 +2229,7 @@ export default function MyItems({
                           backgroundColor: "var(--bg-subtle)",
                         }}
                       />
+                      <ImageCountBadge post={item} />
                       <div
                         style={{
                           position: "absolute",
@@ -2216,7 +2255,7 @@ export default function MyItems({
                       gap: 8,
                     }}
                   >
-                    {!item.imageUrl && (
+                    {!getPostCover(item) && (
                       <div
                         style={{
                           display: "flex",
@@ -2232,7 +2271,7 @@ export default function MyItems({
 
                     {item.status === "pending" && !myClaim && (
                       <div style={{
-                        fontSize: 11, fontWeight: 700, color: "var(--sc-warn-fg)", lineHeight: 1.4,
+                        fontSize: 12, fontWeight: 700, color: "var(--sc-warn-fg)", lineHeight: 1.4,
                         background: "var(--sc-warn-bg)", border: "1px solid var(--sc-warn-border)",
                         padding: "6px 10px", borderRadius: 8,
                       }}>
@@ -2241,7 +2280,7 @@ export default function MyItems({
                     )}
                     {item.status === "rejected" && !myClaim && (
                       <div style={{
-                        fontSize: 11, fontWeight: 700, color: "var(--sc-danger-fg)", lineHeight: 1.4,
+                        fontSize: 12, fontWeight: 700, color: "var(--sc-danger-fg)", lineHeight: 1.4,
                         background: "var(--sc-danger-bg)", border: "1px solid var(--sc-danger-border)",
                         padding: "6px 10px", borderRadius: 8,
                       }}>
@@ -2303,7 +2342,7 @@ export default function MyItems({
                           borderRadius: 6,
                           background: "var(--bg-hover)",
                           border: "1px solid var(--border)",
-                          fontSize: 11,
+                          fontSize: 12,
                           fontWeight: 600,
                           color: "var(--fg-accent)",
                         }}
@@ -2359,7 +2398,7 @@ export default function MyItems({
                             display: "flex",
                             alignItems: "center",
                             gap: 4,
-                            fontSize: 11,
+                            fontSize: 12,
                             color: "var(--fg-muted)",
                             minWidth: 0,
                           }}
@@ -2407,7 +2446,7 @@ export default function MyItems({
 
                       <span
                         style={{
-                          fontSize: 11,
+                          fontSize: 12,
                           fontWeight: 700,
                           color: info.color,
                           flexShrink: 0,

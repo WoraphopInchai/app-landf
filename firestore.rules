@@ -97,13 +97,14 @@ service cloud.firestore {
 
     // คำขอรับของใหม่ต้องอ้างอิงโพสต์ของพบที่มีอยู่จริง จุดตรงกัน และอายุไม่เกินกำหนด
     // (กันสร้างคำขอปลอม/ชี้จุดอื่น/ล็อกโพสต์ถาวรด้วย expiresAtMs ที่ไกลเกินควร)
+    // ระบบเปิดรับนัดเฉพาะ 07:00-16:00 และให้นัดได้ไม่เกิน 3 วันนับรวมวันนี้
     function canCreateValidClaim() {
       let post = get(/databases/$(database)/documents/posts/$(request.resource.data.postId));
       return exists(/databases/$(database)/documents/posts/$(request.resource.data.postId)) &&
         post.data.itemType == 'found' &&
         request.resource.data.depositLocation == post.data.depositLocation &&
         request.resource.data.expiresAtMs >= request.time.toMillis() - 5 * 60 * 1000 &&
-        request.resource.data.expiresAtMs <= request.time.toMillis() + 7 * 24 * 60 * 60 * 1000;
+        request.resource.data.expiresAtMs <= request.time.toMillis() + 3 * 24 * 60 * 60 * 1000;
     }
 
     // ผู้ใช้ทั่วไป "กริ่งแอดมิน" ต้องอ้างอิงข้อมูลจริง ไม่ใช่ค่าปลอม
@@ -224,6 +225,19 @@ service cloud.firestore {
         request.resource.data.diff(resource.data).affectedKeys().hasOnly([
           'status', 'reviewedAt', 'rejectReason', 'reviewedByUid', 'expiredAt'
         ]);
+    }
+
+    // =========================================================
+    // หลักฐานการส่งมอบ (รูปถ่ายผู้มารับของคู่กับของ)
+    // บังคับ: คำขอจะเปลี่ยนเป็น 'approved' ได้ก็ต่อเมื่อมีเอกสารหลักฐานนี้อยู่แล้ว
+    //   - เก็บเป็น subcollection แยกจาก claim เพราะกฎ Firestore คุมระดับ "เอกสาร" ไม่ใช่ระดับฟิลด์
+    //     ถ้าเก็บ URL ไว้บน claim doc ผู้ขอจะอ่านได้เอง (allow read เปิดให้เจ้าของ claim)
+    //   - เขียน 2 จังหวะแยกกัน เพราะกฎอ่านค่าก่อนเริ่ม transaction
+    //     เขียนหลักฐาน+อนุมัติใน transaction เดียวจะถูกปฏิเสธ (กฎเห็นว่ายังไม่มีหลักฐาน)
+    //   - super admin ก็ต้องมีหลักฐานเช่นกัน ไม่มีช่องอ้อม
+    // =========================================================
+    function hasHandoverEvidence(claimId) {
+      return exists(/databases/$(database)/documents/claims/$(claimId)/handover/evidence);
     }
 
 // =============================================
@@ -407,9 +421,14 @@ service cloud.firestore {
         (isStaffAdmin(request.auth.uid) &&
           resource.data.depositLocation == staffPointName())
       );
+      // บังคับหลักฐานการส่งมอบ: เปลี่ยนเป็น 'approved' ได้ก็ต่อเมื่อบันทึกรูปหลักฐานไว้แล้ว
+      // ครอบคลุมทั้ง super admin และเจ้าหน้าที่ (ไม่มีช่องอ้อม)
+      // ปฏิเสธ/หมดอายุ/โพสต์ถูกลบ ไม่ต้องมีหลักฐาน
       allow update: if isLoggedIn() && (
-        isSuperAdmin(request.auth.uid) ||
-        canStaffManageClaim() ||
+        (
+          (isSuperAdmin(request.auth.uid) || canStaffManageClaim()) &&
+          (request.resource.data.status != 'approved' || hasHandoverEvidence(claimId))
+        ) ||
         canOwnerCloseDeletedPostClaim() ||
         (resource.data.claimantId == request.auth.uid &&
           request.resource.data.diff(resource.data).affectedKeys().hasOnly(['claimantName']))
@@ -419,6 +438,34 @@ service cloud.firestore {
       allow delete: if isLoggedIn() &&
         resource.data.claimantId == request.auth.uid &&
         resource.data.status == 'pending';
+
+      // ---------------------------------------------------------
+      // หลักฐานการส่งมอบ (รูปถ่ายผู้มารับของคู่กับของ) — 1 เอกสารต่อคำขอ
+      //   - เขียน: เฉพาะแอดมินที่ดูแลจุดของคำขอนี้ และต้องเขียนตอน claim ยัง 'pending'
+      //   - อ่าน: เฉพาะแอดมิน (ผู้ขออ่านไม่ได้ แม้เป็นเจ้าของ claim — ตาม requirement)
+      //   - แก้/ลบ: ไม่ได้เด็ดขาดเมื่ออนุมัติแล้ว (กันแก้หลักฐานย้อนหลัง)
+      //         ลบได้เฉพาะตอน claim ยัง pending = ล้างหลักฐานกำพร้าเมื่ออนุมัติไม่สำเร็จ
+      // ---------------------------------------------------------
+      match /handover/{evidenceId} {
+        allow create: if isLoggedIn() &&
+          (isSuperAdmin(request.auth.uid) ||
+            (isStaffAdmin(request.auth.uid) &&
+              request.resource.data.depositLocation == staffPointName())) &&
+          request.resource.data.photoUrl is string &&
+          request.resource.data.photoUrl.matches('https://.+') &&
+          request.resource.data.capturedByUid == request.auth.uid &&
+          request.resource.data.capturedAt is string &&
+          get(/databases/$(database)/documents/claims/$(claimId)).data.status == 'pending';
+        allow read: if isSuperAdmin(request.auth.uid) ||
+          (isStaffAdmin(request.auth.uid) &&
+            resource.data.depositLocation == staffPointName());
+        allow update: if false;
+        allow delete: if isLoggedIn() &&
+          (isSuperAdmin(request.auth.uid) ||
+            (isStaffAdmin(request.auth.uid) &&
+              resource.data.depositLocation == staffPointName())) &&
+          get(/databases/$(database)/documents/claims/$(claimId)).data.status != 'approved';
+      }
     }
 
     // =============================================

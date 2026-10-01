@@ -21,9 +21,11 @@ import {
 import { db, auth } from "../firebase";
 import { ITEM_CATEGORIES, UP_LOCATIONS } from "../constants";
 import type { AppUser } from "../types";
-import { uploadToCloudinary } from "../lib/uploadImage";
+import { uploadManyToCloudinary } from "../lib/uploadImage";
+import { MAX_POST_IMAGES, validateImageFile } from "../lib/postImages";
 import { isCurrentUserBanned } from "../lib/userGuard";
 import ToastContainer from "../components/Toast";
+import Dialog, { DialogButton } from "../components/Dialog";
 import { showToast } from "../lib/toast";
 
 interface ReportItemProps {
@@ -32,6 +34,13 @@ interface ReportItemProps {
   onCancel: () => void;
   onOpenProfile?: () => void;
 }
+
+/** รูปที่เลือกแต่ยังไม่ได้อัปโหลด — เก็บ preview เป็น object URL เพื่อให้ได้ทันทีและเรียงตามลำดับไฟล์เสมอ */
+type PendingImage = {
+  id: string;
+  file: File;
+  preview: string;
+};
 
 export default function ReportItem({
   user,
@@ -46,8 +55,9 @@ export default function ReportItem({
   const [returnPointOptions, setReturnPointOptions] = useState<string[]>([]);
   const [desc, setDesc] = useState("");
   const [reporterName] = useState(user?.name || "");
-  const [imagePreview, setImagePreview] = useState<string | null>(null);
-  const [selectedFile, setSelectedFile] = useState<File | null>(null);
+  // เก็บไฟล์กับพรีวิวไว้คู่กันที่ index เดียวกันเสมอ (ไม่งั้นลำดับรูปจะเพี้ยน)
+  const [pendingImages, setPendingImages] = useState<PendingImage[]>([]);
+  const [uploadedCount, setUploadedCount] = useState(0);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [isLocationOpen, setIsLocationOpen] = useState(false);
   const [locationSearch, setLocationSearch] = useState("");
@@ -55,6 +65,17 @@ export default function ReportItem({
   const dropoffConfirmed = useRef(false);
   const [showFoundHint, setShowFoundHint] = useState(false);
   const foundHintShown = useRef(false);
+
+  // ปล่อย object URL ของพรีวิวเมื่อฟอร์มถูกปิด ไม่งั้นหน่วยความจำรูปจะค้าง
+  const pendingImagesRef = useRef<PendingImage[]>(pendingImages);
+  useEffect(() => {
+    pendingImagesRef.current = pendingImages;
+  }, [pendingImages]);
+  useEffect(() => {
+    return () => {
+      pendingImagesRef.current.forEach((p) => URL.revokeObjectURL(p.preview));
+    };
+  }, []);
 
   const handleSelectFound = () => {
     setItemType("found");
@@ -110,25 +131,51 @@ export default function ReportItem({
   );
 
   const handleImageChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
+    const picked = Array.from(e.target.files || []);
+    // ให้เลือกไฟล์เดิมซ้ำได้ (จำเป็นมาก เพราะ input เป็น element เดียวกันทุกครั้ง)
+    e.target.value = "";
+    if (picked.length === 0) return;
 
-    if (!file.type.startsWith("image/")) {
-      showToast("กรุณาเลือกไฟล์รูปภาพเท่านั้น", "info");
+    // เติมให้ครบไม่เกิน 3 รูป
+    const room = MAX_POST_IMAGES - pendingImages.length;
+    if (room <= 0) {
+      showToast(`ใส่รูปได้สูงสุด ${MAX_POST_IMAGES} รูป`, "info");
       return;
     }
+    const accepted: File[] = [];
+    for (const file of picked) {
+      if (accepted.length >= room) break;
+      const err = validateImageFile(file);
+      if (err) {
+        showToast(err, "info");
+        continue;
+      }
+      accepted.push(file);
+    }
+    if (accepted.length === 0) return;
 
-    if (file.size > 5 * 1024 * 1024) {
-      showToast("รูปภาพต้องมีขนาดไม่เกิน 5MB", "info");
-      return;
+    if (picked.length > room) {
+      showToast(`เลือกได้อีก ${room} รูป (สูงสุด ${MAX_POST_IMAGES} รูป)`, "info");
     }
 
-    const reader = new FileReader();
-    reader.onloadend = () => {
-      setImagePreview(reader.result as string);
-    };
-    reader.readAsDataURL(file);
-    setSelectedFile(file);
+    // ใช้ object URL เพราะได้ผลทันที (FileReader เป็น async ทำให้ลำดับพรีวิวเพี้ยนได้)
+    setPendingImages((prev) => [
+      ...prev,
+      ...accepted.map((file, i) => ({
+        id: `${Date.now()}-${prev.length + i}-${file.name}`,
+        file,
+        preview: URL.createObjectURL(file),
+      })),
+    ]);
+  };
+
+  // ลบรูปออกจากช่องที่เลือก
+  const removeImageAt = (index: number) => {
+    setPendingImages((prev) => {
+      const target = prev[index];
+      if (target) URL.revokeObjectURL(target.preview);
+      return prev.filter((_, i) => i !== index);
+    });
   };
 
   // ฟังก์ชันอัปโหลดรูปขึ้น Cloudinary
@@ -177,13 +224,25 @@ export default function ReportItem({
     setIsSubmitting(true);
 
     try {
-      // 1. อัปโหลดรูปภาพผ่าน Cloudinary (ถ้ามี)
-      let imageUrl: string | null = null;
-      if (selectedFile) {
+      // 1. อัปโหลดรูปภาพทั้งหมดผ่าน Cloudinary (ถ้ามี)
+      let imageUrls: string[] = [];
+      const files = pendingImages.map((p) => p.file);
+      if (files.length > 0) {
         try {
-          console.log("Uploading image to Cloudinary...");
-          imageUrl = await uploadToCloudinary(selectedFile);
-          console.log("Cloudinary Upload Success:", imageUrl);
+          console.log(`Uploading ${files.length} image(s) to Cloudinary...`);
+          setUploadedCount(0);
+          imageUrls = await uploadManyToCloudinary(files, (done, total) =>
+            setUploadedCount(done / total)
+          );
+          console.log("Cloudinary Upload Success:", imageUrls);
+          if (imageUrls.length === 0) {
+            showToast("อัปโหลดรูปไม่สำเร็จ แต่จะดำเนินการโพสต์ข้อมูลต่อ", "error");
+          } else if (imageUrls.length < files.length) {
+            showToast(
+              `อัปโหลดสำเร็จ ${imageUrls.length} จาก ${files.length} รูป`,
+              "info"
+            );
+          }
         } catch (imgErr) {
           console.error("Cloudinary upload failed:", imgErr);
           showToast("อัปโหลดรูปไม่สำเร็จ แต่จะดำเนินการโพสต์ข้อมูลต่อ", "error");
@@ -201,7 +260,10 @@ export default function ReportItem({
         date: new Date().toISOString(),
         depositLocation: itemType === "found" ? depositLocation : "",
         desc,
-        imageUrl,
+        // รูปปก = รูปแรก (คงฟิลด์เดิมไว้ให้ทุกที่ที่แสดงรูปเดิมทำงานถูกต้อง)
+        imageUrl: imageUrls[0] || null,
+        // รูปทั้งหมด (สูงสุด 3 รูป)
+        imageUrls,
         status: itemType === "found" ? "pending" : "active",
         createdAt: serverTimestamp(),
         userId: auth.currentUser?.uid || user?.id || "anonymous",
@@ -515,52 +577,114 @@ export default function ReportItem({
               </span>
             </div>
 
-            {imagePreview ? (
-              <div
-                style={{
-                  position: "relative",
-                  width: "100%",
-                  height: "200px",
-                  borderRadius: "14px",
-                  overflow: "hidden",
-                  border: "1px solid var(--border)",
-                  background: "#000",
-                }}
-              >
-                <img
-                  src={imagePreview}
-                  alt="Preview"
+            {pendingImages.length > 0 ? (
+              <>
+                <div
                   style={{
-                    width: "100%",
-                    height: "100%",
-                    objectFit: "contain",
-                  }}
-                />
-                <button
-                  type="button"
-                  onClick={() => {
-                    setImagePreview(null);
-                    setSelectedFile(null);
-                  }}
-                  style={{
-                    position: "absolute",
-                    top: "10px",
-                    right: "10px",
-                    background: "rgba(0, 0, 0, 0.6)",
-                    color: "#fff",
-                    border: "none",
-                    borderRadius: "50%",
-                    width: "32px",
-                    height: "32px",
-                    display: "flex",
-                    alignItems: "center",
-                    justifyContent: "center",
-                    cursor: "pointer",
+                    display: "grid",
+                    gridTemplateColumns: "repeat(3, minmax(0, 1fr))",
+                    gap: "8px",
                   }}
                 >
-                  <X size={16} />
-                </button>
-              </div>
+                  {pendingImages.map(({ id, preview }, idx) => (
+                    <div
+                      key={id}
+                      style={{
+                        position: "relative",
+                        aspectRatio: "1 / 1",
+                        borderRadius: "12px",
+                        overflow: "hidden",
+                        border: "1px solid var(--border)",
+                        background: "var(--bg-subtle)",
+                      }}
+                    >
+                      <img
+                        src={preview}
+                        alt={`รูปที่ ${idx + 1}`}
+                        style={{
+                          width: "100%",
+                          height: "100%",
+                          objectFit: "cover",
+                        }}
+                      />
+                      {idx === 0 && (
+                        <span
+                          style={{
+                            position: "absolute",
+                            top: "5px",
+                            left: "5px",
+                            padding: "2px 7px",
+                            borderRadius: "999px",
+                            background: "rgba(0,0,0,0.66)",
+                            color: "#fff",
+                            fontSize: "10px",
+                            fontWeight: 700,
+                            lineHeight: 1.5,
+                          }}
+                        >
+                          รูปปก
+                        </span>
+                      )}
+                      <button
+                        type="button"
+                        onClick={() => removeImageAt(idx)}
+                        aria-label={`ลบรูปที่ ${idx + 1}`}
+                        style={{
+                          position: "absolute",
+                          top: "5px",
+                          right: "5px",
+                          background: "rgba(0, 0, 0, 0.6)",
+                          color: "#fff",
+                          border: "none",
+                          borderRadius: "50%",
+                          width: "26px",
+                          height: "26px",
+                          display: "flex",
+                          alignItems: "center",
+                          justifyContent: "center",
+                          cursor: "pointer",
+                        }}
+                      >
+                        <X size={14} />
+                      </button>
+                    </div>
+                  ))}
+                </div>
+
+                {/* ปุ่มเพิ่มรูป (ซ่อนเมื่อครบ 3 รูปแล้ว) */}
+                {pendingImages.length < MAX_POST_IMAGES && (
+                  <label
+                    style={{
+                      display: "flex",
+                      alignItems: "center",
+                      justifyContent: "center",
+                      gap: "8px",
+                      marginTop: "8px",
+                      padding: "12px",
+                      backgroundColor: "var(--bg-subtle)",
+                      border: "2px dashed var(--border-strong)",
+                      borderRadius: "12px",
+                      cursor: "pointer",
+                      fontSize: "13px",
+                      fontWeight: 700,
+                      color: "var(--fg-strong)",
+                    }}
+                  >
+                    <Camera size={18} color="var(--fg-accent)" />
+                    เพิ่มรูปภาพ ({pendingImages.length}/{MAX_POST_IMAGES})
+                    <input
+                      type="file"
+                      accept="image/*"
+                      multiple
+                      onChange={handleImageChange}
+                      style={{ display: "none" }}
+                    />
+                  </label>
+                )}
+                <div style={{ fontSize: "11px", color: "var(--fg-muted)", marginTop: "6px" }}>
+                  รูปแรกจะเป็นรูปปกของโพสต์ · รูปละไม่เกิน 5MB
+                </div>
+              </>
             ) : (
               <label
                 style={{
@@ -609,12 +733,13 @@ export default function ReportItem({
                     แตะเพื่ออัปโหลดรูปภาพ
                   </span>
                   <span style={{ fontSize: "11px", color: "var(--fg-muted)" }}>
-                    ถ่ายรูปสิ่งของให้ชัดเจน หรือไฟล์สูงสุด 5MB
+                    เลือกได้สูงสุด {MAX_POST_IMAGES} รูป · ถ่ายให้ชัด หรือไฟล์สูงสุด 5MB ต่อรูป
                   </span>
                 </div>
                 <input
                   type="file"
                   accept="image/*"
+                  multiple
                   onChange={handleImageChange}
                   style={{ display: "none" }}
                 />
@@ -1078,7 +1203,11 @@ export default function ReportItem({
             >
               <CheckCircle2 size={18} color="var(--fg)" />
               <span>
-                {isSubmitting ? "กำลังบันทึกข้อมูล..." : "ส่งข้อมูล"}
+                {isSubmitting
+                  ? uploadedCount > 0
+                    ? `กำลังอัปโหลดรูป ${Math.round(uploadedCount * 100)}%`
+                    : "กำลังบันทึกข้อมูล..."
+                  : "ส่งข้อมูล"}
               </span>
             </button>
           </div>
@@ -1087,309 +1216,120 @@ export default function ReportItem({
 
       <ToastContainer />
 
-      {showFoundHint && (
-        <div
-          style={{
-            position: "fixed",
-            inset: 0,
-            background: "rgba(6, 20, 14, 0.4)",
-            backdropFilter: "blur(6px)",
-            display: "flex",
-            alignItems: "center",
-            justifyContent: "center",
-            zIndex: 200,
-            padding: "16px",
-          }}
-          onClick={() => setShowFoundHint(false)}
-        >
-          <div
-            style={{
-              background: "var(--card-bg, #1a1410)",
-              border: "1px solid var(--sc-ok-border)",
-              borderRadius: "18px",
-              padding: "20px",
-              width: "100%",
-              maxWidth: "380px",
-              boxShadow: "0 24px 60px rgba(0,0,0,.5)",
-            }}
-            onClick={(e) => e.stopPropagation()}
-          >
-            <div
-              style={{
-                width: 44,
-                height: 44,
-                borderRadius: "12px",
+      <Dialog
+        open={showFoundHint}
+        onClose={() => setShowFoundHint(false)}
+        title="แจ้งพบของ — เริ่มจากไม่ยาก มี 3 ขั้น"
+        icon={Box}
+        iconTone="ok"
+        align="start"
+        maxWidth={420}
+        footer={
+          <DialogButton onClick={() => setShowFoundHint(false)} tone="accent" full>
+            รับทราบ เข้าใจแล้ว
+          </DialogButton>
+        }
+      >
+        <div style={{ display: "flex", flexDirection: "column", gap: "10px" }}>
+          {[
+            {
+              step: "1",
+              text: (
+                <>
+                  เลือก<span style={{ fontWeight: 800, color: "var(--sc-ok-fg)" }}>จุดรับฝาก</span>ในฟอร์ม (ป้อมยาม / กองกิจการนิสิต)
+                </>
+              ),
+            },
+            {
+              step: "2",
+              text: "นำของที่พบไปฝากที่จุดนั้น + แจ้งเจ้าหน้าที่ว่ามีของฝากจากระบบ",
+            },
+            {
+              step: "3",
+              text: (
+                <>
+                  แอดมิน<span style={{ fontWeight: 800, color: "var(--sc-ok-fg)" }}>ตรวจรับของ</span>แล้วจึงอนุมัติให้โพสต์ขึ้นระบบ
+                </>
+              ),
+            },
+          ].map((row) => (
+            <div key={row.step} style={{ display: "flex", gap: "10px", alignItems: "flex-start" }}>
+              <div style={{
+                width: 24,
+                height: 24,
+                borderRadius: "50%",
                 background: "var(--sc-ok-bg)",
                 border: "1px solid var(--sc-ok-border)",
-                display: "flex",
-                alignItems: "center",
-                justifyContent: "center",
-                marginBottom: "12px",
                 color: "var(--sc-ok-fg)",
-              }}
-            >
-              <Box size={22} />
-            </div>
-            <div
-              style={{
-                fontSize: "15px",
-                fontWeight: 800,
-                color: "var(--fg-strong, #fff)",
-                marginBottom: "6px",
-              }}
-            >
-              แจ้งพบของ — เริ่มจากไม่ยาก มี 3 ขั้น
-            </div>
-            <div
-              style={{
-                display: "flex",
-                flexDirection: "column",
-                gap: "10px",
-                margin: "12px 0 14px",
-              }}
-            >
-              <div style={{ display: "flex", gap: "10px", alignItems: "flex-start" }}>
-                <div
-                  style={{
-                    width: 22,
-                    height: 22,
-                    borderRadius: "50%",
-                    background: "var(--sc-ok-bg)",
-                    border: "1px solid var(--sc-ok-border)",
-                    color: "var(--sc-ok-fg)",
-                    fontSize: "12px",
-                    fontWeight: 800,
-                    display: "flex",
-                    alignItems: "center",
-                    justifyContent: "center",
-                    flexShrink: 0,
-                  }}
-                >
-                  1
-                </div>
-                <div style={{ fontSize: "13px", lineHeight: 1.5, color: "var(--fg-secondary, #aaa)" }}>
-                  เลือก<span style={{ fontWeight: 800, color: "var(--sc-ok-fg)" }}>จุดรับฝาก</span>ในฟอร์ม
-                  (ป้อมยาม / กองกิจการนิสิต)
-                </div>
-              </div>
-              <div style={{ display: "flex", gap: "10px", alignItems: "flex-start" }}>
-                <div
-                  style={{
-                    width: 22,
-                    height: 22,
-                    borderRadius: "50%",
-                    background: "var(--sc-ok-bg)",
-                    border: "1px solid var(--sc-ok-border)",
-                    color: "var(--sc-ok-fg)",
-                    fontSize: "12px",
-                    fontWeight: 800,
-                    display: "flex",
-                    alignItems: "center",
-                    justifyContent: "center",
-                    flexShrink: 0,
-                  }}
-                >
-                  2
-                </div>
-                <div style={{ fontSize: "13px", lineHeight: 1.5, color: "var(--fg-secondary, #aaa)" }}>
-                  นำของที่พบไปฝากที่จุดนั้น + แจ้งเจ้าหน้าที่ว่ามีของฝากจากระบบ
-                </div>
-              </div>
-              <div style={{ display: "flex", gap: "10px", alignItems: "flex-start" }}>
-                <div
-                  style={{
-                    width: 22,
-                    height: 22,
-                    borderRadius: "50%",
-                    background: "var(--sc-ok-bg)",
-                    border: "1px solid var(--sc-ok-border)",
-                    color: "var(--sc-ok-fg)",
-                    fontSize: "12px",
-                    fontWeight: 800,
-                    display: "flex",
-                    alignItems: "center",
-                    justifyContent: "center",
-                    flexShrink: 0,
-                  }}
-                >
-                  3
-                </div>
-                <div style={{ fontSize: "13px", lineHeight: 1.5, color: "var(--fg-secondary, #aaa)" }}>
-                  แอดมิน<span style={{ fontWeight: 800, color: "var(--sc-ok-fg)" }}>ตรวจรับของ</span>
-                  แล้วจึงอนุมัติให้โพสต์ขึ้นระบบ
-                </div>
-              </div>
-            </div>
-            <div
-              style={{
-                padding: "10px 12px",
-                borderRadius: "10px",
-                background: "var(--sc-brand-bg)",
-                border: "1px solid var(--sc-brand-border)",
                 fontSize: "12px",
-                lineHeight: 1.5,
-                color: "var(--sc-brand-fg)",
-                marginBottom: "16px",
-              }}
-            >
-              ของหายโพสต์ขึ้นทันที /{" "}
-              <span style={{ fontWeight: 800 }}>ของพบต้องผ่านแอดมินตรวจรับของก่อน</span>
-            </div>
-            <button
-              type="button"
-              onClick={() => setShowFoundHint(false)}
-              style={{
-                width: "100%",
-                padding: "11px 0",
-                borderRadius: "12px",
-                background: "var(--accent, #f59e0b)",
-                border: "none",
-                color: "#1a1a1a",
-                fontSize: "13px",
                 fontWeight: 800,
-                cursor: "pointer",
-              }}
-            >
-              รับทราบ เข้าใจแล้ว
-            </button>
-          </div>
-        </div>
-      )}
-
-      {showDropoffConfirm && (
-        <div
-          style={{
-            position: "fixed",
-            inset: 0,
-            background: "rgba(82, 31, 31, 0.28)",
-            backdropFilter: "blur(6px)",
-            display: "flex",
-            alignItems: "center",
-            justifyContent: "center",
-            zIndex: 200,
-            padding: "16px",
-          }}
-          onClick={() => setShowDropoffConfirm(false)}
-        >
-          <div
-            style={{
-              background: "var(--card-bg, #1a1410)",
-              border: "1px solid var(--sc-warn-border)",
-              borderRadius: "18px",
-              padding: "20px",
-              width: "100%",
-              maxWidth: "380px",
-              boxShadow: "0 24px 60px rgba(0,0,0,.5)",
-            }}
-            onClick={(e) => e.stopPropagation()}
-          >
-            <div
-              style={{
-                width: 44,
-                height: 44,
-                borderRadius: "12px",
-                background: "var(--sc-warn-bg)",
-                border: "1px solid var(--sc-warn-border)",
                 display: "flex",
                 alignItems: "center",
                 justifyContent: "center",
-                marginBottom: "12px",
-                color: "var(--sc-warn-fg)",
-              }}
-            >
-              <Box size={22} />
+                flexShrink: 0,
+              }}>
+                {row.step}
+              </div>
+              <div style={{ fontSize: "13.5px", lineHeight: 1.6, color: "var(--fg-secondary)" }}>
+                {row.text}
+              </div>
             </div>
-            <div
-              style={{
-                fontSize: "15px",
-                fontWeight: 800,
-                color: "var(--fg-strong, #fff)",
-                marginBottom: "6px",
-              }}
-            >
-              นำของที่พบไปฝากที่จุดรับฝาก
-            </div>
-            <div
-              style={{
-                fontSize: "13px",
-                lineHeight: 1.6,
-                color: "var(--fg-secondary, #aaa)",
-                marginBottom: "4px",
-              }}
-            >
-              โพสต์ของคุณจะยังไม่ถูกเผยแพร่จนกว่าแอดมินจะตรวจรับของ
-              กรุณานำของไปฝากที่จุดรับฝากที่คุณเลือกไว้:
-            </div>
-            <div
-              style={{
-                margin: "10px 0",
-                padding: "10px 12px",
-                borderRadius: "10px",
-                background: "var(--sc-warn-bg)",
-                border: "1px solid var(--sc-warn-border)",
-                color: "var(--sc-warn-fg)",
-                fontSize: "13px",
-                fontWeight: 800,
-              }}
-            >
-              {depositLocation || "จุดที่เลือกไว้"}
-            </div>
-            <div
-              style={{
-                fontSize: "12px",
-                lineHeight: 1.5,
-                color: "var(--fg-faint, #777)",
-                marginBottom: "16px",
-              }}
-            >
-              แจ้งเจ้าหน้าที่ ณ จุดรับฝากว่ามีของฝากจากระบบ Lost &amp; Found
-              (แสดงชื่อผู้ฝากและข้อมูลที่กรอกได้เลย)
-              หากไม่นำของไปฝากภายในเวลาที่กำหนด โพสต์จะถูกปฏิเสธ
-            </div>
-            <div
-              style={{
-                display: "flex",
-                gap: "10px",
-              }}
-            >
-              <button
-                type="button"
-                onClick={() => setShowDropoffConfirm(false)}
-                style={{
-                  flex: 1,
-                  padding: "11px 0",
-                  borderRadius: "12px",
-                  background: "transparent",
-                  border: "1px solid #3a3a3a",
-                  color: "var(--fg-secondary, #aaa)",
-                  fontSize: "13px",
-                  fontWeight: 700,
-                  cursor: "pointer",
-                }}
-              >
-                ยกเลิก
-              </button>
-              <button
-                type="button"
-                onClick={confirmDropoffAndSubmit}
-                style={{
-                  flex: 1,
-                  padding: "11px 0",
-                  borderRadius: "12px",
-                  background: "var(--accent, #f59e0b)",
-                  border: "none",
-                  color: "#1a1a1a",
-                  fontSize: "13px",
-                  fontWeight: 800,
-                  cursor: "pointer",
-                }}
-              >
-                ยืนยันโอเค ฉันจะนำของไปฝาก
-              </button>
-            </div>
-          </div>
+          ))}
         </div>
-      )}
+        <div style={{
+          padding: "10px 12px",
+          borderRadius: "10px",
+          background: "var(--sc-brand-bg)",
+          border: "1px solid var(--sc-brand-border)",
+          fontSize: "13px",
+          lineHeight: 1.6,
+          color: "var(--sc-brand-fg)",
+          marginTop: "14px",
+        }}>
+          ของหายโพสต์ขึ้นทันที /{" "}
+          <span style={{ fontWeight: 800 }}>ของพบต้องผ่านแอดมินตรวจรับของก่อน</span>
+        </div>
+      </Dialog>
+
+      <Dialog
+        open={showDropoffConfirm}
+        onClose={() => setShowDropoffConfirm(false)}
+        title="นำของที่พบไปฝากที่จุดรับฝาก"
+        icon={Box}
+        iconTone="ok"
+        align="start"
+        maxWidth={440}
+        footer={
+          <>
+            <DialogButton onClick={() => setShowDropoffConfirm(false)}>ยกเลิก</DialogButton>
+            <DialogButton onClick={confirmDropoffAndSubmit} tone="accent">
+              ยืนยันโอเค ฉันจะนำของไปฝาก
+            </DialogButton>
+          </>
+        }
+      >
+        <div style={{ fontSize: "14px", lineHeight: 1.65, color: "var(--fg-secondary)" }}>
+          โพสต์ของคุณจะยังไม่ถูกเผยแพร่จนกว่าแอดมินจะตรวจรับของ
+          กรุณานำของไปฝากที่จุดรับฝากที่คุณเลือกไว้:
+        </div>
+        <div style={{
+          margin: "12px 0",
+          padding: "10px 12px",
+          borderRadius: "10px",
+          background: "var(--sc-warn-bg)",
+          border: "1px solid var(--sc-warn-border)",
+          color: "var(--sc-warn-fg)",
+          fontSize: "14px",
+          fontWeight: 800,
+        }}>
+          {depositLocation || "จุดที่เลือกไว้"}
+        </div>
+        <div style={{ fontSize: "13px", lineHeight: 1.6, color: "var(--fg-faint)" }}>
+          แจ้งเจ้าหน้าที่ ณ จุดรับฝากว่ามีของฝากจากระบบ Lost &amp; Found
+          (แสดงชื่อผู้ฝากและข้อมูลที่กรอกได้เลย)
+          หากไม่นำของไปฝากภายในเวลาที่กำหนด โพสต์จะถูกปฏิเสธ
+        </div>
+      </Dialog>
     </div>
   );
 }

@@ -8,15 +8,18 @@ import {
   Edit2,
   MessageSquareWarning,
   Check,
-  X,
   Send,
+  Flag,
   ChevronRight,
   Reply,
+  GraduationCap,
+  Users,
 } from "lucide-react";
 import { doc, getDoc, updateDoc, collection, addDoc, serverTimestamp, query, where, getDocs, orderBy, limit, onSnapshot, writeBatch } from "firebase/firestore";
 import { auth, db } from "../firebase";
 import type { AppUser } from "../types";
 import ToastContainer from "../components/Toast";
+import Dialog, { DialogButton } from "../components/Dialog";
 import { showToast } from "../lib/toast";
 import { isCurrentUserBanned } from "../lib/userGuard";
 
@@ -73,6 +76,14 @@ export default function Profile({ user, onBack, onLogout, onNameUpdated }: Profi
   const [isEditingName, setIsEditingName] = useState(false);
   const [phone, setPhone] = useState(user?.phoneNumber || "");
   const [isEditingPhone, setIsEditingPhone] = useState(false);
+  // ช่องทางที่เลือกตอนเข้าสู่ระบบ (ยังไม่เคยเลือก = ถือเป็นบุคคลทั่วไป)
+  // บัญชีแอดมินไม่ถูกนับเป็นบุคคลทั่วไป เพราะเข้าผ่านช่องทางผู้ดูแลระบบ
+  const isAdminAccount = user?.role === "admin" || user?.role === "super_admin";
+  const accountType: "student" | "general" = isAdminAccount
+    ? "general"
+    : user?.accountType === "student"
+      ? "student"
+      : "general";
 
   // โหลดข้อมูลโปรไฟล์ล่าสุดจาก Firestore (ชื่อ, เบอร์โทร)
   // พร้อม sync ชื่อย้อนหลังในโพสต์/คำขอ/รายงานให้ตรงชื่อปัจจุบันอัตโนมัติ
@@ -443,6 +454,41 @@ export default function Profile({ user, onBack, onLogout, onNameUpdated }: Profi
           />
         </div>
 
+        {/* ประเภทบัญชี (ช่องทางที่เลือกตอนเข้าสู่ระบบ — ป้ายบอกประเภท ไม่เปลี่ยนสิทธิ์การใช้งาน) */}
+        <div style={{ backgroundColor: "var(--bg-card)", borderRadius: "16px", padding: "16px", border: "1px solid var(--border)", boxShadow: "0 2px 6px rgba(0,0,0,0.3)" }}>
+          <div style={{ display: "flex", alignItems: "center", gap: "8px", fontSize: "13px", fontWeight: 700, color: "var(--fg)", marginBottom: "6px" }}>
+            {isAdminAccount
+              ? <ShieldCheck size={15} color="var(--fg-accent)" />
+              : accountType === "student"
+                ? <GraduationCap size={15} color="var(--fg-accent)" />
+                : <Users size={15} color="var(--fg-accent)" />}
+            <span>ประเภทบัญชี</span>
+          </div>
+          <div
+            style={{
+              display: "inline-flex",
+              alignItems: "center",
+              gap: "6px",
+              padding: "6px 12px",
+              borderRadius: "999px",
+              fontSize: "12.5px",
+              fontWeight: 700,
+              color: isAdminAccount ? "#fcd34d" : accountType === "student" ? "#c4b5fd" : "#5eead4",
+              backgroundColor: isAdminAccount ? "rgba(245,158,11,0.14)" : accountType === "student" ? "rgba(124,92,252,0.14)" : "rgba(13,148,136,0.14)",
+              border: "1px solid " + (isAdminAccount ? "rgba(245,158,11,0.35)" : accountType === "student" ? "rgba(124,92,252,0.35)" : "rgba(13,148,136,0.35)"),
+            }}
+          >
+            {isAdminAccount ? "ผู้ดูแลระบบ" : accountType === "student" ? "นิสิตและบุคลากรมหาวิทยาลัย" : "บุคคลทั่วไป"}
+          </div>
+          <div style={{ fontSize: "11.5px", color: "var(--fg-muted)", marginTop: "8px", lineHeight: 1.5 }}>
+            {isAdminAccount
+              ? "เข้าสู่ระบบผ่านช่องทางผู้ดูแลระบบ (ตรวจสิทธิ์จากฐานข้อมูล)"
+              : accountType === "student"
+                ? "เข้าสู่ระบบผ่านช่องทางนิสิตและบุคลากร (ยืนยันด้วยอีเมล @up.ac.th)"
+                : "เข้าสู่ระบบผ่านช่องทางบุคคลทั่วไป (ไม่มีเงื่อนไขอีเมล)"}
+          </div>
+        </div>
+
         <div style={{ fontSize: "12px", fontWeight: 700, color: "var(--fg-muted)", textTransform: "uppercase", letterSpacing: "0.05em", paddingLeft: "4px", marginTop: "8px" }}>
           ช่วยเหลือและความปลอดภัย
         </div>
@@ -545,162 +591,85 @@ export default function Profile({ user, onBack, onLogout, onNameUpdated }: Profi
       </div>
 
       {/* Modal รายงานปัญหา */}
-      {isReportModalOpen && (
-        <div
-          style={{
-            position: "fixed",
-            top: 0,
-            left: 0,
-            right: 0,
-            bottom: 0,
-            backgroundColor: "rgba(5, 4, 10, 0.72)",
-            backdropFilter: "blur(6px)",
-            display: "flex",
-            alignItems: "center",
-            justifyContent: "center",
-            zIndex: 100,
-            padding: "20px",
-            animation: "fadeIn 0.2s ease",
-          }}
-        >
-          <div
-            style={{
-              backgroundColor: "var(--bg-card)",
-              borderRadius: "20px",
-              width: "100%",
-              maxWidth: "400px",
-              padding: "24px",
-              boxShadow: "0 10px 30px rgba(0,0,0,0.5)",
-              border: "1px solid var(--border)",
-              position: "relative",
-            }}
-          >
-            {/* ปุ่มปิด Modal */}
-            <button
-              onClick={() => setIsReportModalOpen(false)}
+      <Dialog
+        open={isReportModalOpen}
+        onClose={() => setIsReportModalOpen(false)}
+        title="รายงานปัญหา / แจ้งแอดมิน"
+        subtitle="เลือกหัวข้อและระบุรายละเอียดเพื่อให้แอดมินช่วยเหลือได้รวดเร็วขึ้นครับ"
+        icon={Flag}
+        align="start"
+        maxWidth={460}
+        dismissible={false}
+        footer={
+          <>
+            <DialogButton onClick={() => setIsReportModalOpen(false)} disabled={isSubmittingReport}>
+              ยกเลิก
+            </DialogButton>
+            <DialogButton onClick={handleSubmitReport} tone="primary" disabled={isSubmittingReport} icon={Send}>
+              {isSubmittingReport ? "กำลังส่ง..." : "ส่งเรื่อง"}
+            </DialogButton>
+          </>
+        }
+      >
+        {/* เลือกหัวข้อ */}
+        <div style={{ fontSize: "13px", fontWeight: 700, color: "var(--fg)", marginBottom: "8px" }}>
+          หัวข้อปัญหา
+        </div>
+        <div style={{ display: "flex", flexDirection: "column", gap: "8px", marginBottom: "16px" }}>
+          {reportCategories.map((cat) => (
+            <label
+              key={cat}
               style={{
-                position: "absolute",
-                top: "16px",
-                right: "16px",
-                background: "none",
-                border: "none",
+                display: "flex",
+                alignItems: "center",
+                gap: "10px",
+                fontSize: "14px",
                 cursor: "pointer",
-                color: "var(--fg-muted)",
-              }}
-            >
-              <X size={20} />
-            </button>
-
-            <div style={{ fontSize: "16px", fontWeight: 800, color: "var(--fg)", marginBottom: "4px" }}>
-              รายงานปัญหา / แจ้งแอดมิน
-            </div>
-            <div style={{ fontSize: "12px", color: "var(--fg-muted)", marginBottom: "16px" }}>
-              เลือกหัวข้อและระบุรายละเอียดเพื่อให้แอดมินช่วยเหลือได้รวดเร็วขึ้นครับ
-            </div>
-
-            {/* เลือกหัวข้อ */}
-            <div style={{ fontSize: "13px", fontWeight: 700, color: "var(--fg)", marginBottom: "8px" }}>
-              หัวข้อปัญหา
-            </div>
-            <div style={{ display: "flex", flexDirection: "column", gap: "8px", marginBottom: "16px" }}>
-              {reportCategories.map((cat) => (
-                <label
-                  key={cat}
-                  style={{
-                    display: "flex",
-                    alignItems: "center",
-                    gap: "10px",
-                    fontSize: "13px",
-                    cursor: "pointer",
-                    padding: "8px 12px",
-                    borderRadius: "8px",
-                    backgroundColor: selectedCategory === cat ? "var(--bg-hover)" : "var(--bg-subtle)",
-                    border: selectedCategory === cat ? "1px solid #7c5cfc" : "1px solid var(--border)",
-                  }}
-                >
-                  <input
-                    type="radio"
-                    name="reportCategory"
-                    checked={selectedCategory === cat}
-                    onChange={() => setSelectedCategory(cat)}
-                    style={{ accentColor: "#7c5cfc" }}
-                  />
-                  <span style={{ color: selectedCategory === cat ? "var(--fg-accent)" : "var(--fg-secondary)", fontWeight: selectedCategory === cat ? 700 : 400 }}>
-                    {cat}
-                  </span>
-                </label>
-              ))}
-            </div>
-
-            {/* รายละเอียดเพิ่มเติม */}
-            <div style={{ fontSize: "13px", fontWeight: 700, color: "var(--fg)", marginBottom: "8px" }}>
-              รายละเอียดเพิ่มเติม
-            </div>
-            <textarea
-              rows={3}
-              value={reportDetail}
-              onChange={(e) => setReportDetail(e.target.value)}
-              placeholder="พิมพ์อธิบายปัญหาหรือแนบลิงก์ที่เกี่ยวข้อง..."
-              style={{
-                width: "100%",
                 padding: "10px 12px",
                 borderRadius: "8px",
-                border: "1px solid var(--border)",
-                fontSize: "13px",
-                color: "var(--fg)",
-                backgroundColor: "var(--bg-subtle)",
-                outline: "none",
-                resize: "none",
-                marginBottom: "20px",
-                fontFamily: 'inherit',
-                boxSizing: "border-box",
+                minHeight: "44px",
+                backgroundColor: selectedCategory === cat ? "var(--bg-hover)" : "var(--bg-subtle)",
+                border: selectedCategory === cat ? "1px solid #7c5cfc" : "1px solid var(--border)",
               }}
-            />
-
-            {/* ปุ่มส่งรายงาน */}
-            <div style={{ display: "flex", gap: "10px" }}>
-              <button
-                onClick={() => setIsReportModalOpen(false)}
-                style={{
-                  flex: 1,
-                  backgroundColor: "var(--bg-subtle)",
-                  border: "1px solid var(--border)",
-                  borderRadius: "10px",
-                  padding: "12px",
-                  fontSize: "13px",
-                  fontWeight: 700,
-                  color: "var(--fg-secondary)",
-                  cursor: "pointer",
-                }}
-              >
-                ยกเลิก
-              </button>
-              <button
-                onClick={handleSubmitReport}
-                disabled={isSubmittingReport}
-                style={{
-                  flex: 1,
-                  backgroundColor: "#7c5cfc",
-                  border: "none",
-                  borderRadius: "10px",
-                  padding: "12px",
-                  fontSize: "13px",
-                  fontWeight: 700,
-                  color: "var(--fg)",
-                  cursor: "pointer",
-                  display: "flex",
-                  alignItems: "center",
-                  justifyContent: "center",
-                  gap: "6px",
-                  boxShadow: "0 6px 18px rgba(124,92,252,0.4)",
-                }}
-              >
-                <Send size={14} /> {isSubmittingReport ? "กำลังส่ง..." : "ส่งเรื่อง"}
-              </button>
-            </div>
-          </div>
+            >
+              <input
+                type="radio"
+                name="reportCategory"
+                checked={selectedCategory === cat}
+                onChange={() => setSelectedCategory(cat)}
+                style={{ accentColor: "#7c5cfc" }}
+              />
+              <span style={{ color: selectedCategory === cat ? "var(--fg-accent)" : "var(--fg-secondary)", fontWeight: selectedCategory === cat ? 700 : 400 }}>
+                {cat}
+              </span>
+            </label>
+          ))}
         </div>
-      )}
+
+        {/* รายละเอียดเพิ่มเติม */}
+        <div style={{ fontSize: "13px", fontWeight: 700, color: "var(--fg)", marginBottom: "8px" }}>
+          รายละเอียดเพิ่มเติม
+        </div>
+        <textarea
+          rows={3}
+          value={reportDetail}
+          onChange={(e) => setReportDetail(e.target.value)}
+          placeholder="พิมพ์อธิบายปัญหาหรือแนบลิงก์ที่เกี่ยวข้อง..."
+          style={{
+            width: "100%",
+            padding: "10px 12px",
+            borderRadius: "8px",
+            border: "1px solid var(--border)",
+            fontSize: "14px",
+            color: "var(--fg)",
+            backgroundColor: "var(--bg-subtle)",
+            outline: "none",
+            resize: "none",
+            fontFamily: 'inherit',
+            boxSizing: "border-box",
+          }}
+        />
+      </Dialog>
 
       <ToastContainer />
     </div>

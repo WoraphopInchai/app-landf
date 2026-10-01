@@ -137,6 +137,9 @@ html {
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
   text-rendering: optimizeLegibility;
+  /* กัน iOS ยืด/หดขนาดตัวอักษรเอง (เช่นตอนหมุนจอนอน) ทำให้เลย์เอาต์พัง */
+  -webkit-text-size-adjust: 100%;
+  text-size-adjust: 100%;
 }
 
 body {
@@ -309,6 +312,121 @@ input:-webkit-autofill:focus {
   .vc-grid {
     gap: 12px;
   }
+}
+
+/* =========================================================
+   พื้นฐานมือถือ (P0) — กฎกลางที่ใช้ได้ทุกหน้า
+   ========================================================= */
+
+/* 1) iOS Safari ซูมจออัตโนมัติตอนแตะช่องกรอก ถ้าฟอนต์เล็กกว่า 16px
+      กฎเดียวนี้แก้ครบทั้งเว็บ (37 ช่อง) โดยไม่ต้องแก้ทีละไฟล์
+      ต้องใช้ !important เพราะขนาดส่วนใหญ่กำหนดผ่าน inline style */
+@media (max-width: 768px) {
+  input,
+  textarea,
+  select {
+    font-size: 16px !important;
+  }
+}
+
+/* 2) เพดานสูงสูงสุดของ popup/กล่องบนมือถือ
+      เขียน vh ก่อนเป็นค่า fallback แล้วทับด้วย dvh (นับพื้นที่จริง
+      ไม่รวมแถบเบราว์เซอร์/คีย์บอร์ด) */
+.modal-cap {
+  max-height: min(92vh, 940px);
+  max-height: min(92dvh, 940px);
+}
+
+/* 2b) เพดานของตัวดูรูปขนาดเต็ม */
+.lightbox-cap {
+  max-height: 90vh;
+  max-height: 90dvh;
+}
+
+/* 3) เว้นขอบตามจอจริงของมือถือ (เส้นบ้าน iPhone, แถบคีย์บอร์ด) */
+.safe-top {
+  padding-top: env(safe-area-inset-top, 0px);
+}
+.safe-bottom {
+  padding-bottom: env(safe-area-inset-bottom, 0px);
+}
+
+/* 4) กันภาพ/วิดีโอล้นจอแคบ (ไม่แตะส่วนที่กำหนดขนาดเองไว้แล้ว) */
+img,
+video,
+canvas {
+  max-width: 100%;
+}
+
+/* 5) ปุ่มกดติดทันที ไม่มีอาการหน่วง ~300ms ของเบราว์เซอร์มือถือ */
+button,
+a,
+[role="button"],
+input[type="button"],
+input[type="submit"] {
+  touch-action: manipulation;
+}
+
+/* =========================================================
+   แอดมินบนมือถือ (P2) — ไฟล์ Admin.tsx เขียนสไตล์แบบ inline
+   ทำ media query ไม่ได้ จึงใช้คลาสเหล่านี้เป็นตัวช่วย
+   ========================================================= */
+
+/* หัวบน: เว้นขอบเบนสมาร์ทเทย และเว้นระยะเมื่อจอแคบ */
+.adm-topbar {
+  height: auto !important;
+  min-height: 60px;
+  padding-left: max(14px, env(safe-area-inset-left, 0px));
+  padding-right: max(14px, env(safe-area-inset-right, 0px));
+  padding-top: max(10px, env(safe-area-inset-top, 0px));
+  gap: 8px;
+}
+
+/* ป้ายบอกจุดคืน: จอแคบให้เหลือแค่ไอคอน (ชื่อจุดยังอยู่ใน title ให้ชี้เมาส์ดูได้) */
+@media (max-width: 700px) {
+  .adm-hide-narrow {
+    display: none !important;
+  }
+}
+
+/* แถบแท็บ: เลื่อนข้างได้โดยไม่เห็นแถบเลื่อนหน้าต่าง */
+.adm-tabs {
+  overflow-x: auto;
+  overflow-y: hidden;
+  scrollbar-width: none;
+  -ms-overflow-style: none;
+  -webkit-overflow-scrolling: touch;
+  padding-left: max(14px, env(safe-area-inset-left, 0px));
+  padding-right: max(14px, env(safe-area-inset-right, 0px));
+  scroll-snap-type: x proximity;
+}
+.adm-tabs::-webkit-scrollbar {
+  display: none;
+}
+
+/* ปุ่มแท็บ: สูงพอที่จะกดง่ายบนมือถือ */
+.adm-tab {
+  min-height: 40px;
+  padding: 8px 13px;
+  scroll-snap-align: start;
+}
+
+/* เนื้อหาใต้แถบแท็บ */
+.adm-body {
+  padding: 16px;
+  padding-bottom: max(16px, env(safe-area-inset-bottom, 0px));
+}
+@media (max-width: 700px) {
+  .adm-body {
+    padding: 12px;
+  }
+}
+
+/* การ์ดตัวเลข 2 คอลัมน์: จอแคบให้จัดวางใหม่อัตโนมัติ */
+.adm-grid-2 {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(148px, 1fr));
+  gap: 10px;
 }
 
 /* ---------------- Animations ---------------- */

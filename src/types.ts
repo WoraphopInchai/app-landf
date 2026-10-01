@@ -15,6 +15,8 @@ export interface AppUser {
   phoneNumber?: string | null;
   role?: "super_admin" | "admin" | "user" | null;
   loginRole?: "admin" | "user";
+  // ช่องทางที่ผู้ใช้เลือกตอนเข้าสู่ระบบ (null = เข้าผ่านช่องทางแอดมิน)
+  accountType?: "student" | "general" | null;
   // ตำแหน่งของแอดมิน ณ ขณะล็อกอิน (super = หัวหน้า, admin = เจ้าหน้าที่ประจำจุด)
   adminRole?: "super_admin" | "admin" | null;
   // ชื่อจุดคืนของเจ้าหน้าที่ประจำจุด (เฉพาะ admin)
@@ -46,6 +48,8 @@ export interface PostItem {
   desc?: string;
   imageUrl?: string | null;
   image?: string | null;
+  // รูปทั้งหมดของโพสต์ (สูงสุด 3 รูป) — imageUrl ยังคงเก็บรูปปกไว้เป็นรูปแรกเพื่อให้โพสต์เก่าใช้ได้
+  imageUrls?: string[];
   status?: string;
   securityZone?: string;
   depositLocation?: string;

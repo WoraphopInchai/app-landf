@@ -17,7 +17,6 @@ import {
   Maximize2,
   ZoomIn,
   ImagePlus,
-  Loader2,
   GraduationCap,
   Users,
   Sparkles,
@@ -26,6 +25,14 @@ import {
   Search,
   ChevronDown,
   Lock,
+  ChevronLeft,
+  ChevronRight,
+  ShieldCheck,
+  Mail,
+  Loader2,
+  Package,
+  Calendar,
+  AlertCircle,
 } from "lucide-react";
 import {
   doc,
@@ -43,15 +50,114 @@ import {
 } from "firebase/firestore";
 import { confirmAiPair } from "../lib/aiMatch";
 import { db } from "../firebase";
-import { uploadToCloudinary } from "../lib/uploadImage";
+import { uploadToCloudinary, uploadManyToCloudinary } from "../lib/uploadImage";
+import {
+  CLAIM_ROLE_LABEL,
+  resolveClaimRole,
+  sessionEmail,
+  sessionName,
+  toLocalDateTimeInput,
+} from "../lib/claimRole";
+import { getPostImages, getPostCover, MAX_POST_IMAGES, validateImageFile } from "../lib/postImages";
 import { isCurrentUserBanned } from "../lib/userGuard";
 import { ITEM_CATEGORIES, UP_LOCATIONS } from "../constants";
 import type { AppUser, PostItem, FirestoreTimeLike } from "../types";
 import { showToast } from "../lib/toast";
 import ToastContainer from "../components/Toast";
+import Dialog, { DialogButton } from "../components/Dialog";
 
-const MIN_PICKUP_DATETIME = new Date(Date.now() + 60 * 60 * 1000).toISOString().slice(0, 16);
-const MAX_PICKUP_DATETIME = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString().slice(0, 16);
+// แปลงเวลาจาก Firestore ให้เป็น millisecond (รองรับ Timestamp / Date / string)
+// ต้องใช้ตัวนี้แทน new Date(...) เพราะ createdAt ของโพสต์เป็น serverTimestamp() ไม่ใช่ string
+const resolvePostTime = (t?: FirestoreTimeLike): number => {
+  if (!t) return 0;
+  if (t instanceof Date) return t.getTime();
+  if (typeof t !== "object") return new Date(t).getTime();
+  if (typeof t.toDate === "function") return t.toDate().getTime();
+  return 0;
+};
+
+// จุดรับของเปิดรับนัดเฉพาะช่วงเช้า 07:00-16:00
+const PICKUP_OPEN_HOUR = 7;
+const PICKUP_CLOSE_MIN = 16 * 60;
+// นัดได้ไม่เกิน 3 วันนับรวมวันนี้ (วันนี้, พรุ่งนี้, อีก 1 วัน)
+const PICKUP_LAST_DAY_OFFSET = 2;
+
+const minutesOfDay = (d: Date) => d.getHours() * 60 + d.getMinutes();
+
+/** เวลานัดอยู่ในช่วงที่จุดรับของเปิดไหม (07:00-16:00) */
+const isPickupTimeAllowed = (d: Date) => {
+  const m = minutesOfDay(d);
+  return m >= PICKUP_OPEN_HOUR * 60 && m <= PICKUP_CLOSE_MIN;
+};
+
+/** วันสุดท้ายที่นัดได้ (วันนี้ + 2 วัน เวลา 16:00) */
+const getPickupLastDay = (from?: Date) => {
+  const d = from ? new Date(from) : new Date();
+  d.setDate(d.getDate() + PICKUP_LAST_DAY_OFFSET);
+  d.setHours(16, 0, 0, 0);
+  return d;
+};
+
+/** บีบเวลาให้อยู่ใน 07:00-16:00 ของวันเดิม (ใช้ตอนผู้ใช้พิมพ์เวลาเอง) */
+const clampPickupTimeOfDay = (d: Date) => {
+  const out = new Date(d);
+  const m = minutesOfDay(out);
+  if (m < PICKUP_OPEN_HOUR * 60) out.setHours(PICKUP_OPEN_HOUR, 0, 0, 0);
+  else if (m > PICKUP_CLOSE_MIN) out.setHours(16, 0, 0, 0);
+  return out;
+};
+
+/** ถ้าเวลาที่ได้อยู่นอก 07:00-16:00 ให้ขยับไปวันถัดไปตอนเปิด (ใช้ตอนเลือกว่าจะนัดวันไหน) */
+const moveToNextOpenDay = (d: Date) => {
+  d.setDate(d.getDate() + 1);
+  d.setHours(PICKUP_OPEN_HOUR, 0, 0, 0);
+  return d;
+};
+
+// ช่วงเวลาที่เลือกนัดรับของได้ (คำนวณใหม่ทุกครั้งที่เปิดฟอร์ม และใช้เวลาท้องถิ่น)
+const getPickupWindow = () => {
+  const earliest = new Date(Date.now() + 60 * 60 * 1000);
+  // เริ่มนัดได้ไม่ก่อน 1 ชั่วโมงนับจากตอนนี้ และต้องอยู่ในช่วง 07:00-16:00
+  let min = clampPickupTimeOfDay(earliest);
+  if (minutesOfDay(earliest) > PICKUP_CLOSE_MIN) min = moveToNextOpenDay(new Date(earliest));
+  return {
+    min: toLocalDateTimeInput(min),
+    max: toLocalDateTimeInput(getPickupLastDay()),
+  };
+};
+
+/* ตัวช่วยนัดเวลาแบบลัด: สร้างค่า "YYYY-MM-DDTHH:mm" (เวลาท้องถิ่น) จากจำนวนวันที่เลื่อนไปข้างหน้า
+   และเวลา HH:mm โดยบังคับให้อยู่ใน 07:00-16:00 และไม่เกิน 3 วันนับรวมวันนี้
+   คืน null ถ้าไม่มีช่วงเวลาที่รับได้แล้ว */
+const buildPickupValue = (daysAhead: number, time: string) => {
+  const [h, m] = time.split(":").map((n) => parseInt(n, 10));
+  if (Number.isNaN(h) || Number.isNaN(m)) return null;
+  const d = new Date();
+  d.setDate(d.getDate() + daysAhead);
+  d.setHours(h, m, 0, 0);
+  // เวลาที่เลือกอยู่นอกช่วงเปิดของวันนั้น → ไปวันถัดไปตอนเปิด
+  if (!isPickupTimeAllowed(d)) moveToNextOpenDay(d);
+  // เวลาที่เลยไปแล้ว → เลื่อนไปวันถัดไป
+  while (d.getTime() < Date.now() + 60 * 60 * 1000) {
+    moveToNextOpenDay(d);
+  }
+  if (d.getTime() > getPickupLastDay().getTime()) return null;
+  return toLocalDateTimeInput(d);
+};
+
+// แสดงวันเวลาที่เลือกนัดแบบอ่านง่าย (เช่น "พรุ่งนี้ 10:00" หรือ "ศ. 3 ต.ค. 10:00")
+const formatPickupForDisplay = (value: string) => {
+  const d = new Date(value);
+  if (Number.isNaN(d.getTime())) return value;
+  const hhmm = `${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}`;
+  const tomorrow = new Date();
+  tomorrow.setDate(tomorrow.getDate() + 1);
+  const sameDay = (a: Date, b: Date) =>
+    a.getFullYear() === b.getFullYear() && a.getMonth() === b.getMonth() && a.getDate() === b.getDate();
+  if (sameDay(d, tomorrow)) return `พรุ่งนี้ ${hhmm}`;
+  if (sameDay(d, new Date())) return `วันนี้ ${hhmm}`;
+  return d.toLocaleDateString("th-TH", { day: "numeric", month: "short" }) + ` ${hhmm}`;
+};
 
 // ปิดคำขอรับของ pending + รายงาน open ของโพสต์ที่ผู้ใช้ลบเอง
 const closeDataForDeletedPost = async (postId: string, postTitle?: string) => {
@@ -168,7 +274,8 @@ export default function ItemDetail({ item: initialItem, onBack, currentUser, onS
   const [editTitle, setEditTitle] = useState("");
   const [editDesc, setEditDesc] = useState("");
   const [editLocation, setEditLocation] = useState("");
-  const [editImageFile, setEditImageFile] = useState<File | null>(null);
+  const [editImages, setEditImages] = useState<string[]>([]);
+  const [editNewFiles, setEditNewFiles] = useState<File[]>([]);
   const [isSavingEdit, setIsSavingEdit] = useState(false);
   const [editLocationOpen, setEditLocationOpen] = useState(false);
   const [editLocationSearch, setEditLocationSearch] = useState("");
@@ -187,18 +294,22 @@ export default function ItemDetail({ item: initialItem, onBack, currentUser, onS
     return () => document.removeEventListener("mousedown", handleClickOutside);
   }, []);
   const [showClaimModal, setShowClaimModal] = useState(false);
-  const [claimType, setClaimType] = useState<"student" | "public">("student");
   const [claimName, setClaimName] = useState("");
-  const [claimStudentId, setClaimStudentId] = useState("");
   const [claimPhone, setClaimPhone] = useState("");
-  const [claimEmail, setClaimEmail] = useState("");
   const [claimNote, setClaimNote] = useState("");
   const [claimEvidenceFile, setClaimEvidenceFile] = useState<File | null>(null);
   const [claimEvidenceUrl, setClaimEvidenceUrl] = useState<string>("");
   const [claimPickupDate, setClaimPickupDate] = useState("");
+  // โพสต์ของหายของผู้ใช้เองที่ใช้ยืนยันว่าตรงกับโพสต์ของที่พบที่กดขอรับ
+  const [myLostPosts, setMyLostPosts] = useState<PostItem[]>([]);
+  const [isLoadingMyPosts, setIsLoadingMyPosts] = useState(false);
+  const [claimMatchedPostId, setClaimMatchedPostId] = useState("");
   const [isClaimEvidenceUploading, setIsClaimEvidenceUploading] = useState(false);
   const [alreadyRequested, setAlreadyRequested] = useState(false);
   const [showImageViewer, setShowImageViewer] = useState(false);
+  // คาราเซลรูป: heroIndex = รูปที่แสดงใน hero, viewerIndex = รูปที่เปิดใน lightbox
+  const [heroIndex, setHeroIndex] = useState(0);
+  const [viewerIndex, setViewerIndex] = useState(0);
   const [myMatchedPosts, setMyMatchedPosts] = useState<
     {
       postId: string;
@@ -352,12 +463,103 @@ export default function ItemDetail({ item: initialItem, onBack, currentUser, onS
     return () => { cancelled = true; };
   }, [item?.id, item, currentUser?.uid]);
 
+  // รูปทั้งหมดของโพสต์ (รองรับทั้งโพสต์เก่าที่มีแค่ imageUrl และโพสต์ใหม่ที่มี imageUrls)
+  const postImages = item ? getPostImages(item) : [];
+  // จำกัดค่าให้อยู่ในช่วงเสมอ (กันกรณีสลับโพสต์/ลบรูปแล้ว index ค้าง)
+  const heroSafe = postImages.length > 0 ? Math.min(heroIndex, postImages.length - 1) : 0;
+  const viewerSafe = postImages.length > 0 ? Math.min(viewerIndex, postImages.length - 1) : 0;
+  const goHero = (next: number) =>
+    setHeroIndex((postImages.length + next) % postImages.length);
+  const goViewer = (next: number) =>
+    setViewerIndex((postImages.length + next) % postImages.length);
+
+  // Role ของผู้ขอรับของ มาจาก session ที่ล็อกอินอยู่ (ผู้ใช้เลือกเองไม่ได้)
+  const claimRole = resolveClaimRole(currentUser);
+  const isStudentRole = claimRole === "student";
+  const claimRoleLabel = CLAIM_ROLE_LABEL[claimRole];
+  // ชื่อ/อีเมลดึงจากระบบยืนยันตัวตน ไม่ต้องให้ผู้ใช้กรอก
+  const sessionClaimName = sessionName(currentUser);
+  const sessionClaimEmail = sessionEmail(currentUser);
+  // โพสต์ของหายของผู้ใช้เองที่เลือกไว้ (ใช้ยืนยันการจับคู่กับโพสต์ของที่พบ)
+  const selectedMyLostPost = myLostPosts.find((p) => p.id === claimMatchedPostId) || null;
+  // ช่วงเวลานัดรับของ (คำนวณใหม่ทุกครั้งที่เปิดฟอร์ม และใช้เวลาท้องถิ่น)
+  const [pickupWindow, setPickupWindow] = useState(() => getPickupWindow());
+  const [showPickupPicker, setShowPickupPicker] = useState(false);
+
+  // แยกวัน/เวลาออกจากค่า "YYYY-MM-DDTHH:mm" เพื่อใช้กับ input type=date / type=time
+  const pickupDatePart = claimPickupDate.slice(0, 10);
+  const pickupTimePart = claimPickupDate.slice(11, 16);
+
+  /* ตรวจว่าเวลานัดที่เลือกอยู่ในช่วงที่ระบบรับได้ (อย่างน้อย 1 ชม. ไม่เกิน 3 วันนับรวมวันนี้ และอยู่ในเวลา 07:00-16:00)
+     ใช้ pickupWindow ที่คำนวณตอนเปิดฟอร์ม (อยู่ใน state) เป็นขอบเขต เพื่อไม่เรียก Date.now() ระหว่าง render */
+  const pickupError = (() => {
+    if (!claimPickupDate) return "";
+    const d = new Date(claimPickupDate);
+    const ms = d.getTime();
+    if (Number.isNaN(ms)) return "รูปแบบวันและเวลาไม่ถูกต้อง";
+    if (!isPickupTimeAllowed(d)) return "เวลานัดต้องอยู่ระหว่าง 07:00-16:00";
+    if (ms < new Date(pickupWindow.min).getTime()) {
+      return "ต้องนัดหลังจากตอนนี้อย่างน้อย 1 ชั่วโมง";
+    }
+    if (ms > new Date(pickupWindow.max).getTime()) {
+      return "ต้องนัดภายใน 3 วันนับจากวันนี้ (ไม่เกินวันที่ " +
+        getPickupLastDay().toLocaleDateString("th-TH", { day: "numeric", month: "short" }) + ")";
+    }
+    return "";
+  })();
+
+  // เลื่อนด้วยคีย์บอร์ดตอนเปิด lightbox (ปิดด้วย Escape)
+  useEffect(() => {
+    if (!showImageViewer) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") setShowImageViewer(false);
+      if (e.key === "ArrowRight" && postImages.length > 1) goViewer(1);
+      if (e.key === "ArrowLeft" && postImages.length > 1) goViewer(-1);
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [showImageViewer, postImages.length]);
+
+  // เลื่อนรูปด้วยการปัดนิ้ว (มือถือ) — แยกจุดเริ่มของ hero กับ lightbox
+  const SWIPE_THRESHOLD = 45;
+  const [heroTouchX, setHeroTouchX] = useState<number | null>(null);
+  const [viewerTouchX, setViewerTouchX] = useState<number | null>(null);
+
+  const heroSwipe = {
+    onTouchStart: (e: React.TouchEvent) =>
+      setHeroTouchX(e.touches[0]?.clientX ?? null),
+    onTouchEnd: (e: React.TouchEvent) => {
+      const start = heroTouchX;
+      setHeroTouchX(null);
+      if (start === null) return;
+      const delta = (e.changedTouches[0]?.clientX ?? start) - start;
+      // ข้ามที่ปัดสั้นเกินไป เพื่อไม่ให้ติดกับการเลื่อนแนวตั้ง
+      if (Math.abs(delta) < SWIPE_THRESHOLD) return;
+      goHero(delta < 0 ? 1 : -1);
+    },
+  };
+
+  const viewerSwipe = {
+    onTouchStart: (e: React.TouchEvent) =>
+      setViewerTouchX(e.touches[0]?.clientX ?? null),
+    onTouchEnd: (e: React.TouchEvent) => {
+      const start = viewerTouchX;
+      setViewerTouchX(null);
+      if (start === null) return;
+      const delta = (e.changedTouches[0]?.clientX ?? start) - start;
+      if (Math.abs(delta) < SWIPE_THRESHOLD) return;
+      goViewer(delta < 0 ? 1 : -1);
+    },
+  };
+
   if (!item) {
     return null;
   }
 
   const isLost = item.itemType === "lost" || item.type === "lost";
   const isResolved = item.status === "resolved";
+
   const isInvestigating = item.status === "under_investigation";
   const isInProgress = item.status === "in_progress";
   const isSuspended = item.status === "suspended";
@@ -388,7 +590,8 @@ export default function ItemDetail({ item: initialItem, onBack, currentUser, onS
     setEditTitle(item.title || "");
     setEditDesc(item.desc || "");
     setEditLocation(item.locationName || item.building || item.location || "");
-    setEditImageFile(null);
+    setEditImages(getPostImages(item));
+    setEditNewFiles([]);
     setEditLocationOpen(false);
     setEditLocationSearch("");
     setShowEditModal(true);
@@ -412,10 +615,23 @@ export default function ItemDetail({ item: initialItem, onBack, currentUser, onS
 
     setIsSavingEdit(true);
     try {
-      let newImageUrl = item.imageUrl || item.image || "";
-      if (editImageFile) {
+      // รูปที่เหลืออยู่ = รูปเดิมที่ยังไม่ถูกลบ + รูปใหม่ที่เพิ่งอัปโหลด
+      let finalImages = [...editImages];
+      if (editNewFiles.length > 0) {
         try {
-          newImageUrl = await uploadToCloudinary(editImageFile);
+          const uploaded = await uploadManyToCloudinary(editNewFiles);
+          if (uploaded.length === 0) {
+            showToast("อัปโหลดรูปใหม่ไม่สำเร็จ กรุณาลองใหม่อีกครั้ง", "error");
+            setIsSavingEdit(false);
+            return;
+          }
+          if (uploaded.length < editNewFiles.length) {
+            showToast(
+              `อัปโหลดสำเร็จ ${uploaded.length} จาก ${editNewFiles.length} รูป`,
+              "info"
+            );
+          }
+          finalImages = [...finalImages, ...uploaded].slice(0, MAX_POST_IMAGES);
         } catch (uploadError) {
           console.error("Error uploading image:", uploadError);
           showToast("อัปโหลดรูปใหม่ไม่สำเร็จ กรุณาลองใหม่อีกครั้ง", "error");
@@ -431,13 +647,15 @@ export default function ItemDetail({ item: initialItem, onBack, currentUser, onS
         locationName: string;
         building: string;
         imageUrl?: string | null;
+        imageUrls?: string[];
       } = {
         category: editCategory,
         title: editTitle.trim(),
         desc: editDesc.trim(),
         locationName: editLocation.trim(),
         building: editLocation.trim(),
-        imageUrl: newImageUrl || null,
+        imageUrl: finalImages[0] || null,
+        imageUrls: finalImages,
       };
 
       await updateDoc(doc(db, "posts", item.id), patch);
@@ -450,6 +668,66 @@ export default function ItemDetail({ item: initialItem, onBack, currentUser, onS
     } finally {
       setIsSavingEdit(false);
     }
+  };
+
+  /* โหลด "โพสต์ของหายของผู้ใช้เอง" มาให้เลือกจับคู่กับโพสต์ของที่พบ
+     (เฉพาะของหายของตัวเอง และตัดโพสต์ที่กำลังกดขอรับอยู่ออก)
+     หมายเหตุ: จงค้นด้วยเงื่อนไขเดียว (userId) แล้วกรอง itemType + เรียงลำดับใน client
+     เพราะ query แบบ userId + itemType + orderBy(createdAt) ต้องใช้ composite index
+     ซึ่งยังไม่ได้ deploy จึงจะ error FAILED_PRECONDITION และได้รายการว่าง */
+  const loadMyLostPosts = async () => {
+    if (!currentUser?.uid) {
+      setMyLostPosts([]);
+      return;
+    }
+    setIsLoadingMyPosts(true);
+    try {
+      const q = query(
+        collection(db, "posts"),
+        where("userId", "==", currentUser.uid)
+      );
+      const snap = await getDocs(q);
+      const rows = snap.docs
+        .map((d) => ({ id: d.id, ...d.data() }) as PostItem)
+        .filter((p) => p.itemType === "lost" && p.id !== item.id)
+        .sort((a, b) => resolvePostTime(b.createdAt) - resolvePostTime(a.createdAt))
+        .slice(0, 30);
+      setMyLostPosts(rows);
+    } catch (err) {
+      console.error("Error loading my lost posts:", err);
+      setMyLostPosts([]);
+    } finally {
+      setIsLoadingMyPosts(false);
+    }
+  };
+
+  /* เปิดฟอร์มขอรับของ: เตรียมค่าเริ่มต้นตาม role ที่ล็อกอินอยู่ + โหลดรายการโพสต์ของหายของตัวเอง */
+  const openClaimModal = () => {
+    // บุคคลทั่วไปต้องกรอกชื่อเอง (เติมชื่อจาก session ไว้ให้แก้ได้)
+    // นิสิต/บุคลากรดึงชื่อจากระบบยืนยันตัวตนอัตโนมัติ
+    setClaimName(sessionClaimName);
+    setClaimPhone("");
+    setClaimNote("");
+    setClaimPickupDate("");
+    setClaimEvidenceFile(null);
+    setClaimEvidenceUrl("");
+    setClaimMatchedPostId("");
+    setPickupWindow(getPickupWindow());
+    setShowPickupPicker(false);
+    setShowClaimModal(true);
+    void loadMyLostPosts();
+  };
+
+  /* ปิดฟอร์มขอรับของแล้วล้างค่าที่กรอกค้างไว้ทุกครั้ง */
+  const closeClaimModal = () => {
+    setShowClaimModal(false);
+    setShowPickupPicker(false);
+    setClaimName("");
+    setClaimPhone("");
+    setClaimNote("");
+    setClaimPickupDate("");
+    setClaimEvidenceFile(null);
+    setClaimEvidenceUrl("");
   };
 
   const handleClaimItem = async () => {
@@ -465,29 +743,26 @@ export default function ItemDetail({ item: initialItem, onBack, currentUser, onS
       console.error("Error checking user status:", e);
     }
 
-    if (!claimName.trim()) {
+    // ชื่อ: นิสิต/บุคลากรดึงจากระบบยืนยันตัวตน · บุคคลทั่วไปกรอกเอง (หรือแก้ชื่อที่เติมให้ได้)
+    const finalName = (isStudentRole ? sessionClaimName : claimName).trim();
+    if (!finalName) {
       showToast("กรุณาระบุชื่อ-นามสกุล", "info");
       return;
     }
-
-    if (claimType === "student") {
-      if (!claimStudentId.trim()) {
-        showToast("กรุณาระบุรหัสนิสิต", "info");
-        return;
-      }
-      if (!claimPhone.trim()) {
-        showToast("กรุณาระบุเบอร์โทร", "info");
-        return;
-      }
-    } else {
-      if (!claimPhone.trim()) {
-        showToast("กรุณาระบุเบอร์โทร", "info");
-        return;
-      }
-      if (!claimEmail.trim() || !/^\S+@\S+\.\S+$/.test(claimEmail.trim())) {
-        showToast("กรุณาระบุอีเมลที่ถูกต้อง เช่น name@example.com", "info");
-        return;
-      }
+    if (!claimPhone.trim()) {
+      showToast("กรุณาระบุเบอร์โทร", "info");
+      return;
+    }
+    // อีเมล: ดึงจาก session ที่ล็อกอิน ใช้ยืนยันตัวตน (ผู้ใช้แก้เองไม่ได้)
+    if (!sessionClaimEmail || !/^\S+@\S+\.\S+$/.test(sessionClaimEmail)) {
+      showToast("ไม่พบอีเมลของบัญชีที่ล็อกอินอยู่ กรุณาออกจากระบบแล้วเข้าสู่ระบบใหม่", "info");
+      return;
+    }
+    // เวลานัดรับของ: ต้องอยู่ในช่วงที่ระบบรับได้ (อย่างน้อย 1 ชม. ไม่เกิน 3 วันนับรวมวันนี้ และอยู่ใน 07:00-16:00) ตาม canCreateValidClaim()
+    if (pickupError) {
+      showToast(pickupError, "info");
+      setShowPickupPicker(true);
+      return;
     }
 
     setIsSubmitting(true);
@@ -518,11 +793,11 @@ export default function ItemDetail({ item: initialItem, onBack, currentUser, onS
         depositLocation: item.depositLocation || "",
         postImageUrl: item.imageUrl || "",
         claimantId: currentUser.uid,
-        claimantName: claimName.trim(),
-        claimType,
-        studentId: claimType === "student" ? claimStudentId.trim() : "",
+        claimantName: finalName,
+        claimType: claimRole, // เก็บ role ตาม session เดิม (student/public)
+        studentId: isStudentRole ? "" : "",
         phone: claimPhone.trim(),
-        email: claimType === "public" ? claimEmail.trim() : "",
+        email: sessionClaimEmail,
         contact: claimPhone.trim() || "ไม่ระบุช่องทางติดต่อ",
         note: claimNote.trim(),
         evidenceUrl,
@@ -530,6 +805,9 @@ export default function ItemDetail({ item: initialItem, onBack, currentUser, onS
         expiresAt,
         expiresAtMs: new Date(expiresAt).getTime(),
         pickupDate: claimPickupDate || null,
+        // ฟิลด์ใหม่เพื่อแสดงในแอดมินว่าจับคู่กับโพสต์ของหายไหน
+        matchedPostId: selectedMyLostPost?.id || null,
+        matchedPostTitle: selectedMyLostPost?.title || null,
         createdAt: serverTimestamp(),
       });
 
@@ -564,7 +842,7 @@ export default function ItemDetail({ item: initialItem, onBack, currentUser, onS
           postId: item.id,
           postTitle: item.title,
           itemType: item.itemType || item.type || "found",
-          claimantName: claimName.trim(),
+          claimantName: finalName,
           read: false,
           createdAt: serverTimestamp(),
         });
@@ -575,16 +853,7 @@ export default function ItemDetail({ item: initialItem, onBack, currentUser, onS
       showToast(claimPickupDate
         ? "ส่งคำขอรับของเรียบร้อย ระบบได้จองโพสต์นี้ไว้แล้วจนถึงวันนัดรับ กรุณามารับของตามเวลาที่กำหนด"
         : "ส่งคำขอรับของเรียบร้อย ระบบได้จองโพสต์นี้ไว้แล้ว (24 ชม.) กรุณามาติดต่อเจ้าหน้าที่เพื่อรับของ");
-      setShowClaimModal(false);
-      setClaimType("student");
-      setClaimName("");
-      setClaimStudentId("");
-      setClaimPhone("");
-      setClaimEmail("");
-      setClaimNote("");
-      setClaimPickupDate("");
-      setClaimEvidenceFile(null);
-      setClaimEvidenceUrl("");
+      closeClaimModal();
     } catch (error) {
       console.error("Error creating claim request:", error);
       showToast("ส่งคำขอไม่สำเร็จ กรุณาลองใหม่อีกครั้ง", "error");
@@ -782,31 +1051,72 @@ export default function ItemDetail({ item: initialItem, onBack, currentUser, onS
           position: "relative",
         }}
       >
-        {item.imageUrl || item.image ? (
-          <button
-            onClick={() => setShowImageViewer(true)}
-            style={{
-              width: "100%",
-              height: "100%",
-              padding: 0,
-              border: "none",
-              background: "transparent",
-              cursor: "pointer",
-              display: "block",
-            }}
-            aria-label="ดูรูปภาพขนาดใหญ่"
-          >
-            <img
-              src={item.imageUrl || item.image || undefined}
-              alt={item.title}
+        {postImages.length > 0 ? (
+          <>
+            <button
+              onClick={() => {
+                setViewerIndex(heroSafe);
+                setShowImageViewer(true);
+              }}
               style={{
                 width: "100%",
                 height: "100%",
-                objectFit: "cover",
-                filter: isResolved ? "grayscale(20%)" : "none",
+                padding: 0,
+                border: "none",
+                background: "transparent",
+                cursor: "pointer",
+                display: "block",
               }}
-            />
-          </button>
+              aria-label="ดูรูปภาพขนาดใหญ่"
+              {...(postImages.length > 1 ? heroSwipe : {})}
+            >
+              <img
+                src={postImages[heroSafe]}
+                alt={item.title}
+                style={{
+                  width: "100%",
+                  height: "100%",
+                  objectFit: "cover",
+                  filter: isResolved ? "grayscale(20%)" : "none",
+                }}
+              />
+            </button>
+
+            {/* ลูกศรเลื่อนรูป (แสดงเมื่อมีมากกว่า 1 รูป) */}
+            {postImages.length > 1 && (
+              <>
+                {([-1, 1] as const).map((dir) => (
+                  <button
+                    key={dir}
+                    type="button"
+                    onClick={() => goHero(heroSafe + dir)}
+                    aria-label={dir === -1 ? "รูปก่อนหน้า" : "รูปถัดไป"}
+                    style={{
+                      position: "absolute",
+                      top: "50%",
+                      [dir === -1 ? "left" : "right"]: "10px",
+                      transform: "translateY(-50%)",
+                      width: "34px",
+                      height: "34px",
+                      borderRadius: "50%",
+                      border: "none",
+                      backgroundColor: "rgba(11, 10, 16, 0.62)",
+                      color: "#fff",
+                      display: "flex",
+                      alignItems: "center",
+                      justifyContent: "center",
+                      cursor: "pointer",
+                      backdropFilter: "blur(8px)",
+                      boxShadow: "0 2px 8px rgba(0,0,0,0.3)",
+                      zIndex: 2,
+                    }}
+                  >
+                    {dir === -1 ? <ChevronLeft size={18} /> : <ChevronRight size={18} />}
+                  </button>
+                ))}
+              </>
+            )}
+          </>
         ) : (
           <div style={{ textAlign: "center", color: "var(--fg-faint)" }}>
             <PackageCheck size={48} color="var(--fg-faint)" style={{ marginBottom: "8px" }} />
@@ -850,9 +1160,12 @@ export default function ItemDetail({ item: initialItem, onBack, currentUser, onS
           }}
         />
 
-        {(item.imageUrl || item.image) && (
+        {postImages.length > 0 && (
           <div
-            onClick={() => setShowImageViewer(true)}
+            onClick={() => {
+              setViewerIndex(heroSafe);
+              setShowImageViewer(true);
+            }}
             style={{
               position: "absolute",
               bottom: "12px",
@@ -874,6 +1187,60 @@ export default function ItemDetail({ item: initialItem, onBack, currentUser, onS
             <Maximize2 size={13} />
             แตะเพื่อดูรูปใหญ่
           </div>
+        )}
+
+        {/* จุดบอกตำแหน่งรูป + ลิขนาสถานะ */}
+        {postImages.length > 1 && (
+          <>
+            <div
+              style={{
+                position: "absolute",
+                bottom: "14px",
+                left: "50%",
+                transform: "translateX(-50%)",
+                display: "flex",
+                gap: "6px",
+                zIndex: 2,
+              }}
+            >
+              {postImages.map((_, i) => (
+                <button
+                  key={i}
+                  type="button"
+                  onClick={() => setHeroIndex(i)}
+                  aria-label={`ดูรูปที่ ${i + 1}`}
+                  style={{
+                    width: i === heroSafe ? "20px" : "7px",
+                    height: "7px",
+                    padding: 0,
+                    borderRadius: "999px",
+                    border: "none",
+                    cursor: "pointer",
+                    backgroundColor: i === heroSafe ? "#fff" : "rgba(255,255,255,0.5)",
+                    boxShadow: "0 1px 4px rgba(0,0,0,0.4)",
+                    transition: "all 0.2s ease",
+                  }}
+                />
+              ))}
+            </div>
+            <div
+              style={{
+                position: "absolute",
+                top: "14px",
+                left: "14px",
+                padding: "4px 10px",
+                borderRadius: "20px",
+                backgroundColor: "rgba(11, 10, 16, 0.7)",
+                color: "#fff",
+                fontSize: "11px",
+                fontWeight: 800,
+                backdropFilter: "blur(8px)",
+                boxShadow: "0 2px 8px rgba(0,0,0,0.3)",
+              }}
+            >
+              {heroSafe + 1}/{postImages.length}
+            </div>
+          </>
         )}
       </div>
 
@@ -1207,13 +1574,13 @@ export default function ItemDetail({ item: initialItem, onBack, currentUser, onS
                             handleConfirmDecision(item.id || "", mp.postId, "confirm")
                           }
                           style={{
-                            height: 26,
-                            padding: "0 10px",
-                            borderRadius: 7,
+                            minHeight: 40,
+                            padding: "0 14px",
+                            borderRadius: 10,
                             border: "1px solid rgba(52,211,153,0.5)",
                             background: "rgba(52,211,153,0.14)",
                             color: "var(--sc-ok-fg)",
-                            fontSize: 10.5,
+                            fontSize: 12,
                             fontWeight: 800,
                             cursor: busyConfirmKey ? "wait" : "pointer",
                           }}
@@ -1227,13 +1594,13 @@ export default function ItemDetail({ item: initialItem, onBack, currentUser, onS
                             handleConfirmDecision(item.id || "", mp.postId, "reject")
                           }
                           style={{
-                            height: 26,
-                            padding: "0 10px",
-                            borderRadius: 7,
+                            minHeight: 40,
+                            padding: "0 14px",
+                            borderRadius: 10,
                             border: "1px solid rgba(244,63,94,0.5)",
                             background: "rgba(244,63,94,0.10)",
                             color: "var(--sc-danger-fg)",
-                            fontSize: 10.5,
+                            fontSize: 12,
                             fontWeight: 800,
                             cursor: busyConfirmKey ? "wait" : "pointer",
                           }}
@@ -1335,10 +1702,10 @@ export default function ItemDetail({ item: initialItem, onBack, currentUser, onS
               onClick={() => {
                 if (!currentUser?.uid) {
                   // หลังล็อกอิน ให้เปิด modal คำขอรับของต่อทันที
-                  onRequireLogin?.(() => setShowClaimModal(true));
+                  onRequireLogin?.(() => openClaimModal());
                   return;
                 }
-                setShowClaimModal(true);
+                openClaimModal();
               }}
               disabled={isSubmitting || alreadyRequested}
               style={{
@@ -1474,848 +1841,977 @@ export default function ItemDetail({ item: initialItem, onBack, currentUser, onS
       </div>
 
       {/* Claim Confirmation Modal */}
-      {showClaimModal && (
-        <div style={{
-          position: "fixed", inset: 0, backgroundColor: "rgba(5,4,10,0.72)",
-          backdropFilter: "blur(6px)",
-          zIndex: 100, display: "flex", alignItems: "center", justifyContent: "center",
-          padding: "16px", animation: "fadeIn 0.2s ease",
-          overflowY: "auto",
-        }}>
-          <div style={{
-            backgroundColor: "var(--bg-card)", borderRadius: "20px",
-            width: "100%", maxWidth: "400px",
-            boxShadow: "0 25px 60px rgba(0,0,0,0.6), 0 0 40px rgba(124,92,252,0.12)",
-            border: "1px solid var(--border)",
-            margin: "auto",
-            maxHeight: "calc(100vh - 32px)",
-            display: "flex", flexDirection: "column",
-            overflow: "hidden",
-          }}>
-            {/* Header */}
-            <div style={{
-              position: "relative",
-              padding: "20px 20px 16px",
-              borderBottom: "1px solid var(--border)",
-              flexShrink: 0,
-            }}>
-              <button
-                onClick={() => {
-                  setShowClaimModal(false);
-                  setClaimType("student");
-                  setClaimName("");
-                  setClaimStudentId("");
-                  setClaimPhone("");
-                  setClaimEmail("");
-                  setClaimNote("");
-                  setClaimPickupDate("");
-                  setClaimEvidenceFile(null);
-                  setClaimEvidenceUrl("");
-                }}
-                style={{
-                  position: "absolute", top: 16, right: 16,
-                  width: 30, height: 30, borderRadius: "50%",
-                  background: "var(--bg-hover)", border: "none",
-                  display: "flex", alignItems: "center", justifyContent: "center",
-                  cursor: "pointer", color: "var(--fg-secondary)",
-                }}
-              >
-                <X size={16} />
-              </button>
-              <div style={{ textAlign: "center" }}>
-                <div style={{
-                  width: "56px", height: "56px", borderRadius: "16px", margin: "0 auto 12px",
-                  background: "linear-gradient(135deg, #7c5cfc, #4f3bd6)",
-                  display: "flex", alignItems: "center", justifyContent: "center",
-                  boxShadow: "0 8px 20px rgba(124,92,252,0.45)",
-                }}>
-                  <PackageCheck size={26} color="var(--accent-fg)" />
-                </div>
-                <h3 style={{ fontSize: "17px", fontWeight: 800, color: "var(--fg)", margin: "0 0 6px 0" }}>
-                  ส่งคำขอรับของถึงแอดมิน
-                </h3>
-                <p style={{ fontSize: "12px", color: "var(--fg-muted)", lineHeight: "1.6", margin: 0, paddingRight: "16px" }}>
-                  ส่งแล้วโพสต์จะถูกจองให้คุณทันที (24 ชม. หรือตามวันที่นัดรับ) แล้วนำหลักฐานไปแสดงกับเจ้าหน้าที่ที่จุดรับของ
-                </p>
-              </div>
-            </div>
-
-            {/* Scrollable Body */}
-            <div
-              className="claim-modal-body"
-              style={{
-                flex: 1, overflowY: "auto", padding: "16px 20px 20px",
-                scrollbarWidth: "none", msOverflowStyle: "none",
-                minHeight: 0,
-              }}
+      <Dialog
+        open={showClaimModal}
+        onClose={closeClaimModal}
+        title="ส่งคำขอรับของถึงแอดมิน"
+        subtitle="ส่งแล้วโพสต์จะถูกจองให้คุณทันที (24 ชม. หรือตามวันที่นัดรับ) แล้วนำหลักฐานไปแสดงกับเจ้าหน้าที่ที่จุดรับของ"
+        icon={PackageCheck}
+        iconTone="primary"
+        align="start"
+        maxWidth={480}
+        dismissible={false}
+        footer={
+          <>
+            <DialogButton onClick={closeClaimModal} disabled={isSubmitting}>ยกเลิก</DialogButton>
+            <DialogButton
+              onClick={handleClaimItem}
+              tone="primary"
+              disabled={isSubmitting}
+              icon={isSubmitting ? undefined : Send}
             >
-              <div style={{
-                backgroundColor: "var(--sc-warn-bg)", border: "1px solid var(--sc-warn-border)", borderRadius: "12px",
-                padding: "12px", marginBottom: "16px",
-              }}>
-                <div style={{ fontSize: "11px", color: "var(--sc-warn-fg-strong)", lineHeight: 1.5 }}>
-                  <strong>ขั้นตอนการรับของ:</strong><br />
-                  1. ส่งคำขอ → โพสต์จะถูกจองให้คุณทันที (24 ชม. / ตามวันนัด)<br />
-                  2. ไปที่จุดรับของพร้อมหลักฐานความเป็นเจ้าของ<br />
-                  3. เจ้าหน้าที่ตรวจสอบและยืนยัน → ระบบจะปิดเคสเป็น "คืนแล้ว"
-                </div>
-              </div>
-
-              {/* Tabs: นิสิต / บุคคลทั่วไป (เหมือนหน้า Login) */}
-              <div style={{
-                display: "flex",
-                background: "var(--bg-subtle)",
-                border: "1px solid var(--border)",
-                borderRadius: "12px",
-                padding: "4px",
-                marginBottom: "16px",
-                position: "relative",
-              }}>
-                <div style={{
-                  position: "absolute",
-                  top: "4px",
-                  bottom: "4px",
-                  width: "calc(50% - 4px)",
-                  borderRadius: "9px",
-                  background: "linear-gradient(135deg, #7c5cfc, #6a4eff)",
-                  boxShadow: "0 4px 16px rgba(124,92,252,0.4)",
-                  transition: "left 0.28s cubic-bezier(0.16, 1, 0.3, 1)",
-                  zIndex: 0,
-                  left: claimType === "public" ? "calc(50% + 0px)" : "0px",
-                }} />
-                <button
-                  type="button"
-                  onClick={() => setClaimType("student")}
-                  style={{
-                    flex: 1,
-                    position: "relative",
-                    zIndex: 1,
-                    padding: "11px 0",
-                    border: "none",
-                    background: "transparent",
-                    cursor: "pointer",
-                    display: "flex",
-                    alignItems: "center",
-                    justifyContent: "center",
-                    gap: "7px",
-                    fontSize: "13px",
-                    fontWeight: 700,
-                    color: claimType === "student" ? "#fff" : "var(--fg-muted)",
-                    transition: "color 0.2s ease",
-                  }}
-                >
-                  <GraduationCap size={14} />
-                  นิสิต
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setClaimType("public")}
-                  style={{
-                    flex: 1,
-                    position: "relative",
-                    zIndex: 1,
-                    padding: "11px 0",
-                    border: "none",
-                    background: "transparent",
-                    cursor: "pointer",
-                    display: "flex",
-                    alignItems: "center",
-                    justifyContent: "center",
-                    gap: "7px",
-                    fontSize: "13px",
-                    fontWeight: 700,
-                    color: claimType === "public" ? "#fff" : "var(--fg-muted)",
-                    transition: "color 0.2s ease",
-                  }}
-                >
-                  <Users size={14} />
-                  บุคคลทั่วไป
-                </button>
-              </div>
-
-              {/* ชื่อ-นามสกุล (มีทั้งสองฝั่ง) */}
-              <div style={{ marginBottom: "12px" }}>
-                <label style={{ display: "block", fontSize: "12px", fontWeight: 700, color: "var(--fg-secondary)", marginBottom: "6px" }}>
-                  ชื่อ-นามสกุล *
-                </label>
-                <input
-                  type="text"
-                  value={claimName}
-                  onChange={(e) => setClaimName(e.target.value)}
-                  placeholder="เช่น สมชาย ใจดี"
-                  required
-                  style={{
-                    width: "100%", padding: "10px 12px", borderRadius: "10px",
-                    border: "1.5px solid var(--border)", fontSize: "12px", outline: "none",
-                    boxSizing: "border-box", backgroundColor: "var(--bg-subtle)", color: "var(--fg)",
-                    transition: "border-color 0.15s",
-                  }}
-                />
-              </div>
-
-              {/* เฉพาะนิสิต: รหัสนิสิต */}
-              {claimType === "student" && (
-                <div style={{ marginBottom: "12px" }}>
-                  <label style={{ display: "block", fontSize: "12px", fontWeight: 700, color: "var(--fg-secondary)", marginBottom: "6px" }}>
-                    รหัสนิสิต *
-                  </label>
-                  <input
-                    type="text"
-                    value={claimStudentId}
-                    onChange={(e) => setClaimStudentId(e.target.value)}
-                    placeholder="เช่น 63XXXXXXXX"
-                    required
-                    style={{
-                      width: "100%", padding: "10px 12px", borderRadius: "10px",
-                      border: "1.5px solid var(--border)", fontSize: "12px", outline: "none",
-                      boxSizing: "border-box", backgroundColor: "var(--bg-subtle)", color: "var(--fg)",
-                      transition: "border-color 0.15s",
-                    }}
-                  />
-                </div>
-              )}
-
-              {/* เบอร์โทร (มีทั้งสองฝั่ง) */}
-              <div style={{ marginBottom: "12px" }}>
-                <label style={{ display: "block", fontSize: "12px", fontWeight: 700, color: "var(--fg-secondary)", marginBottom: "6px" }}>
-                  เบอร์โทร *
-                </label>
-                <input
-                  type="tel"
-                  value={claimPhone}
-                  onChange={(e) => setClaimPhone(e.target.value)}
-                  placeholder="เช่น 08X-XXX-XXXX"
-                  required
-                  style={{
-                    width: "100%", padding: "10px 12px", borderRadius: "10px",
-                    border: "1.5px solid var(--border)", fontSize: "12px", outline: "none",
-                    boxSizing: "border-box", backgroundColor: "var(--bg-subtle)", color: "var(--fg)",
-                    transition: "border-color 0.15s",
-                  }}
-                />
-              </div>
-
-              {/* เฉพาะบุคคลทั่วไป: อีเมล */}
-              {claimType === "public" && (
-                <div style={{ marginBottom: "12px" }}>
-                  <label style={{ display: "block", fontSize: "12px", fontWeight: 700, color: "var(--fg-secondary)", marginBottom: "6px" }}>
-                    อีเมล *
-                  </label>
-                  <input
-                    type="email"
-                    value={claimEmail}
-                    onChange={(e) => setClaimEmail(e.target.value)}
-                    placeholder="เช่น name@example.com"
-                    required
-                    style={{
-                      width: "100%", padding: "10px 12px", borderRadius: "10px",
-                      border: "1.5px solid var(--border)", fontSize: "12px", outline: "none",
-                      boxSizing: "border-box", backgroundColor: "var(--bg-subtle)", color: "var(--fg)",
-                      transition: "border-color 0.15s",
-                    }}
-                  />
-                </div>
-              )}
-
-              <div style={{ marginBottom: "12px" }}>
-                <label style={{ display: "block", fontSize: "12px", fontWeight: 700, color: "var(--fg-secondary)", marginBottom: "6px" }}>
-                  รายละเอียด / หลักฐาน (เพิ่มเติม)
-                </label>
-                <textarea
-                  rows={3}
-                  value={claimNote}
-                  onChange={(e) => setClaimNote(e.target.value)}
-                  placeholder="ระบุตำหนิ รายละเอียดที่พอจำได้ หรือหลักฐานยืนยันตัวตน"
-                  style={{
-                    width: "100%", padding: "10px 12px", borderRadius: "10px",
-                    border: "1.5px solid var(--border)", fontSize: "12px", outline: "none",
-                    boxSizing: "border-box", fontFamily: "inherit", resize: "none",
-                    backgroundColor: "var(--bg-subtle)", color: "var(--fg)",
-                    transition: "border-color 0.15s",
-                  }}
-                />
-              </div>
-
-              <div style={{ marginBottom: "4px" }}>
-                <label style={{ display: "block", fontSize: "12px", fontWeight: 700, color: "var(--fg-secondary)", marginBottom: "6px" }}>
-                  รูปหลักฐานความเป็นเจ้าของ (ถ้ามี)
-                </label>
-                <input
-                  type="file"
-                  accept="image/*"
-                  onChange={handleEvidenceFileSelect}
-                  style={{ display: "none" }}
-                  id="claim-evidence-upload"
-                />
-                {claimEvidenceUrl ? (
-                  <div style={{ position: "relative", borderRadius: "12px", overflow: "hidden", border: "1.5px solid var(--border)" }}>
-                    <img src={claimEvidenceUrl} alt="หลักฐาน" style={{ width: "100%", height: "160px", objectFit: "cover", display: "block" }} />
-                    <button
-                      onClick={() => { setClaimEvidenceFile(null); setClaimEvidenceUrl(""); }}
-                      style={{
-                        position: "absolute", top: 8, right: 8, width: 28, height: 28, borderRadius: "50%",
-                        background: "rgba(0,0,0,0.6)", border: "none", color: "#fff",
-                        display: "flex", alignItems: "center", justifyContent: "center", cursor: "pointer",
-                      }}
-                    >
-                      <X size={14} />
-                    </button>
-                  </div>
-                ) : (
-                  <label
-                    htmlFor="claim-evidence-upload"
-                    style={{
-                      display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center",
-                      padding: "22px 16px", borderRadius: "12px", cursor: "pointer",
-                      border: "1.5px dashed var(--border-strong)", backgroundColor: "var(--bg-subtle)",
-                      color: "var(--fg-muted)", fontSize: "12px", fontWeight: 600, gap: "8px",
-                      transition: "border-color 0.15s",
-                    }}
-                  >
-                    <ImagePlus size={22} color="var(--fg-accent)" />
-                    แตะเพื่อเลือกรูปหลักฐาน
-                    <span style={{ fontSize: "10px", color: "var(--fg-faint)" }}>PNG, JPG สูงสุด 5MB</span>
-                  </label>
-                )}
-              </div>
-            </div>
-
-            {/* นัดวันรับของ (ไม่บังคับ) */}
-            <div style={{ marginBottom: "16px" }}>
-              <label style={{ display: "block", fontSize: "12px", fontWeight: 700, color: "var(--fg-secondary)", marginBottom: "6px" }}>
-                นัดวัน-เวลามารับของ <span style={{ color: "var(--fg-faint)", fontWeight: 500 }}>(ไม่บังคับ · ถ้าไม่เลือกคำขอมีอายุ 24 ชม.)</span>
-              </label>
-              <input
-                type="datetime-local"
-                value={claimPickupDate}
-                min={MIN_PICKUP_DATETIME}
-                max={MAX_PICKUP_DATETIME}
-                onChange={(e) => setClaimPickupDate(e.target.value)}
-                style={{
-                  width: "100%", padding: "10px 12px", borderRadius: "10px",
-                  border: "1.5px solid var(--border)", fontSize: "12px", outline: "none",
-                  boxSizing: "border-box", backgroundColor: "var(--bg-subtle)", color: "var(--fg)",
-                  colorScheme: "dark",
-                }}
-              />
-              <div style={{ fontSize: "10.5px", color: "var(--fg-faint)", marginTop: "5px", lineHeight: 1.5 }}>
-                ระบุวันมารับที่คุณสะดวก คำขอจะถูกจองไว้จนถึงเวลานั้น (ถ้าไม่มาตรงเวลาจะโดนปล่อยให้คนถัดไป)
-              </div>
-            </div>
-
-            {/* Sticky Footer */}
-            <div style={{
-              display: "flex", gap: "10px", flexShrink: 0,
-              padding: "14px 20px",
-              borderTop: "1px solid var(--border)",
-              background: "var(--bg-card)",
-            }}>
-              <button
-                onClick={() => {
-                  setShowClaimModal(false);
-                  setClaimType("student");
-                  setClaimName("");
-                  setClaimStudentId("");
-                  setClaimPhone("");
-                  setClaimEmail("");
-                  setClaimNote("");
-                  setClaimPickupDate("");
-                  setClaimEvidenceFile(null);
-                  setClaimEvidenceUrl("");
-                }}
-                style={{
-                  flex: 1, padding: "12px", borderRadius: "12px",
-                  border: "1px solid var(--border)", backgroundColor: "var(--bg-subtle)",
-                  color: "var(--fg-secondary)", fontSize: "13px", fontWeight: 700, cursor: "pointer",
-                }}
-              >
-                ยกเลิก
-              </button>
-              <button
-                onClick={handleClaimItem}
-                disabled={isSubmitting}
-                style={{
-                  flex: 1, padding: "12px", borderRadius: "12px", border: "none",
-                  background: "#7c5cfc",
-                  color: "var(--accent-fg)", fontSize: "13px", fontWeight: 700,
-                  cursor: isSubmitting ? "not-allowed" : "pointer",
-                  display: "flex", alignItems: "center", justifyContent: "center", gap: "6px",
-                  boxShadow: "0 6px 18px rgba(124,92,252,0.4)",
-                }}
-              >
-                {isSubmitting ? <Loader2 size={15} style={{ animation: "spin 1s linear infinite" }} /> : <Send size={15} />}
-                {isSubmitting
-                  ? isClaimEvidenceUploading
-                    ? "กำลังอัปโหลดรูปหลักฐาน..."
-                    : "กำลังส่งคำขอ..."
-                  : "ส่งคำขอรับของ"}
-              </button>
+              {isSubmitting
+                ? (isClaimEvidenceUploading ? "กำลังอัปโหลดรูปหลักฐาน..." : "กำลังส่งคำขอ...")
+                : "ส่งคำขอรับของ"}
+            </DialogButton>
+          </>
+        }
+      >
+        <form
+          id="claim-form"
+          onSubmit={(e) => { e.preventDefault(); void handleClaimItem(); }}
+          style={{ display: "flex", flexDirection: "column", gap: "14px" }}
+        >
+          <div style={{
+            backgroundColor: "var(--sc-warn-bg)", border: "1px solid var(--sc-warn-border)", borderRadius: "12px",
+            padding: "12px 14px",
+          }}>
+            <div style={{ fontSize: "12.5px", color: "var(--sc-warn-fg-strong)", lineHeight: 1.7 }}>
+              <strong>ขั้นตอนการรับของ:</strong><br />
+              1. ส่งคำขอ → โพสต์จะถูกจองให้คุณทันที (24 ชม. / ตามวันนัด)<br />
+              2. ไปที่จุดรับของพร้อมหลักฐานความเป็นเจ้าของ<br />
+              3. เจ้าหน้าที่ตรวจสอบและยืนยัน → ระบบจะปิดเคสเป็น "คืนแล้ว"
             </div>
           </div>
-        </div>
-      )}
 
-      {/* Edit Post Modal */}
-      {showEditModal && (
-        <div style={{
-          position: "fixed", inset: 0, backgroundColor: "rgba(5,4,10,0.72)",
-          backdropFilter: "blur(6px)",
-          zIndex: 100, display: "flex", alignItems: "center", justifyContent: "center",
-          padding: "20px", animation: "fadeIn 0.2s ease",
-        }}>
+          {/* Role ผู้ขอรับของ — ระบบเลือกให้อัตโนมัติจากช่องทางที่ล็อกอินอยู่ (ผู้ใช้เลือกเองไม่ได้) */}
           <div style={{
-            backgroundColor: "var(--bg-card)", borderRadius: "20px", padding: "22px",
-            width: "100%", maxWidth: "400px",
-            boxShadow: "0 25px 60px rgba(0,0,0,0.6)",
-            border: "1px solid var(--border)",
-            maxHeight: "calc(100vh - 32px)", overflowY: "auto",
+            display: "flex",
+            alignItems: "center",
+            gap: "10px",
+            padding: "12px 14px",
+            borderRadius: "12px",
+            background: isStudentRole ? "rgba(124,92,252,0.12)" : "rgba(13,148,136,0.12)",
+            border: `1px solid ${isStudentRole ? "rgba(124,92,252,0.35)" : "rgba(13,148,136,0.35)"}`,
           }}>
-            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "14px" }}>
-              <div style={{ display: "flex", alignItems: "center", gap: "8px", color: "var(--fg-strong)", fontWeight: 800, fontSize: "16px" }}>
-                <Pencil size={20} />
-                แก้ไขโพสต์
+            {isStudentRole
+              ? <GraduationCap size={20} color="#c4b5fd" style={{ flexShrink: 0 }} />
+              : <Users size={20} color="#5eead4" style={{ flexShrink: 0 }} />}
+            <div style={{ minWidth: 0, flex: 1 }}>
+              <div style={{ fontSize: "11px", fontWeight: 700, color: "var(--fg-muted)" }}>
+                ประเภทผู้ขอรับของ (จากช่องทางที่ล็อกอิน)
               </div>
-              <button
-                onClick={() => setShowEditModal(false)}
+              <div style={{
+                fontSize: "14px", fontWeight: 800, lineHeight: 1.4,
+                color: isStudentRole ? "#c4b5fd" : "#5eead4",
+              }}>
+                {claimRoleLabel}
+              </div>
+            </div>
+            <ShieldCheck size={16} color="var(--fg-faint)" style={{ flexShrink: 0 }} />
+          </div>
+
+          {/* ชื่อ-นามสกุล: นิสิต/บุคลากรดึงจากระบบยืนยันตัวตน · บุคคลทั่วไปกรอกเอง */}
+          <div>
+            <label style={{ display: "block", fontSize: "13.5px", fontWeight: 700, color: "var(--fg-secondary)", marginBottom: "6px" }}>
+              ชื่อ-นามสกุล *
+            </label>
+            {isStudentRole ? (
+              <div style={{
+                display: "flex", alignItems: "center", gap: "8px",
+                minHeight: "46px", padding: "10px 12px", borderRadius: "10px",
+                border: "1.5px solid var(--border)", backgroundColor: "var(--bg-subtle)",
+                color: "var(--fg-faint)", fontSize: "13.5px",
+              }}>
+                <User size={15} style={{ flexShrink: 0 }} />
+                {sessionClaimName || "ไม่พบชื่อในระบบ"}
+              </div>
+            ) : (
+              <input
+                type="text"
+                value={claimName}
+                onChange={(e) => setClaimName(e.target.value)}
+                placeholder="เช่น สมชาย ใจดี"
+                required
                 style={{
-                  border: "none", background: "var(--bg-hover)", cursor: "pointer",
-                  color: "var(--fg-secondary)", borderRadius: "50%", width: "30px", height: "30px",
-                  display: "flex", alignItems: "center", justifyContent: "center",
+                  width: "100%", minHeight: "46px", padding: "10px 12px", borderRadius: "10px",
+                  border: "1.5px solid var(--border)", fontSize: "13.5px", outline: "none",
+                  boxSizing: "border-box", backgroundColor: "var(--bg-subtle)", color: "var(--fg)",
+                  transition: "border-color 0.15s",
+                }}
+              />
+            )}
+            {isStudentRole && (
+              <div style={{ fontSize: "12px", color: "var(--fg-faint)", marginTop: "6px", lineHeight: 1.6 }}>
+                ดึงชื่ออัตโนมัติจากบัญชีที่ยืนยันอีเมล @up.ac.th แล้ว
+              </div>
+            )}
+          </div>
+
+          {/* อีเมล: ดึงจากระบบล็อกอินมาใช้ยืนยัน (ทั้ง 2 role) */}
+          <div>
+            <label style={{ display: "block", fontSize: "13.5px", fontWeight: 700, color: "var(--fg-secondary)", marginBottom: "6px" }}>
+              อีเมลยืนยันตัวตน
+            </label>
+            <div style={{
+              display: "flex", alignItems: "center", gap: "8px",
+              minHeight: "46px", padding: "10px 12px", borderRadius: "10px",
+              border: "1.5px solid var(--border)", backgroundColor: "var(--bg-subtle)",
+              color: "var(--fg-faint)", fontSize: "13.5px", wordBreak: "break-all",
+            }}>
+              <Mail size={15} style={{ flexShrink: 0 }} />
+              {sessionClaimEmail || "ไม่พบอีเมลในระบบ"}
+            </div>
+            <div style={{ fontSize: "12px", color: "var(--fg-faint)", marginTop: "6px", lineHeight: 1.6 }}>
+              ดึงจากระบบยืนยันตัวตนอัตโนมัติ แก้ไขไม่ได้
+            </div>
+          </div>
+
+          {/* เบอร์โทร — ทั้ง 2 role ต้องกรอกเอง */}
+          <div>
+            <label style={{ display: "block", fontSize: "13.5px", fontWeight: 700, color: "var(--fg-secondary)", marginBottom: "6px" }}>
+              เบอร์โทรศัพท์ *
+            </label>
+            <input
+              type="tel"
+              value={claimPhone}
+              onChange={(e) => setClaimPhone(e.target.value)}
+              placeholder="เช่น 08X-XXX-XXXX"
+              required
+              style={{
+                width: "100%", minHeight: "46px", padding: "10px 12px", borderRadius: "10px",
+                border: "1.5px solid var(--border)", fontSize: "13.5px", outline: "none",
+                boxSizing: "border-box", backgroundColor: "var(--bg-subtle)", color: "var(--fg)",
+                transition: "border-color 0.15s",
+              }}
+            />
+          </div>
+
+          {/* เลือกโพสต์ของหายของตัวเอง เพื่อยืนยันว่าตรงกับโพสต์ของที่พบ */}
+          <div>
+            <label style={{ display: "block", fontSize: "13.5px", fontWeight: 700, color: "var(--fg-secondary)", marginBottom: "6px" }}>
+              โพสต์ของหายของคุณที่ตรงกับ <span style={{ color: "var(--fg-faint)", fontWeight: 500 }}>(ช่วยให้แอดมินตรวจสอบได้เร็วขึ้น)</span>
+            </label>
+            {isLoadingMyPosts ? (
+              <div style={{
+                minHeight: "46px", display: "flex", alignItems: "center", gap: "8px",
+                padding: "10px 12px", borderRadius: "10px",
+                border: "1.5px solid var(--border)", backgroundColor: "var(--bg-subtle)",
+                color: "var(--fg-faint)", fontSize: "13.5px",
+              }}>
+                <Loader2 size={15} style={{ animation: "spin 0.8s linear infinite" }} />
+                กำลังโหลดโพสต์ของคุณ...
+              </div>
+            ) : myLostPosts.length === 0 ? (
+              <div style={{
+                padding: "12px", borderRadius: "10px",
+                border: "1.5px dashed var(--border-strong)", backgroundColor: "var(--bg-subtle)",
+                color: "var(--fg-faint)", fontSize: "12.5px", lineHeight: 1.6,
+              }}>
+                ยังไม่มีโพสต์ของหายของคุณในระบบ — ถ้าคุณเคยลงโพสต์ของหายไว้ ให้ตรวจสอบว่าอยู่ในบัญชีนี้และเลือกแท็บ “ของหาย” ในหน้า “ของฉัน”
+              </div>
+            ) : (
+              <select
+                value={claimMatchedPostId}
+                onChange={(e) => setClaimMatchedPostId(e.target.value)}
+                style={{
+                  width: "100%", minHeight: "46px", padding: "10px 12px", borderRadius: "10px",
+                  border: "1.5px solid var(--border)", fontSize: "13.5px", outline: "none",
+                  boxSizing: "border-box", backgroundColor: "var(--bg-subtle)", color: "var(--fg)",
                 }}
               >
-                <X size={18} />
-              </button>
-            </div>
-
-            <form onSubmit={handleSaveEdit}>
-              <div style={{ marginBottom: "12px" }}>
-                <label style={{ display: "block", fontSize: "12px", fontWeight: 700, color: "var(--fg-secondary)", marginBottom: "6px" }}>
-                  ประเภท *
-                </label>
-                <select
-                  disabled
-                  value={item.itemType || item.type || "lost"}
-                  style={{
-                    width: "100%", padding: "10px 12px", borderRadius: "10px",
-                    border: "1.5px solid var(--border)", fontSize: "12px", outline: "none",
-                    boxSizing: "border-box", backgroundColor: "var(--bg-subtle)", color: "var(--fg-faint)",
-                    cursor: "not-allowed", opacity: 0.75,
-                  }}
-                >
-                  <option value="lost">ของหาย</option>
-                  <option value="found">ของที่พบ</option>
-                </select>
-                <div style={{ fontSize: 10.5, color: "var(--fg-faint)", marginTop: 4, display: "flex", alignItems: "center", gap: 4 }}>
-                  <Lock size={11} /> ไม่สามารถเปลี่ยนประเภทโพสต์หลังประกาศแล้ว
-                </div>
-              </div>
-
-              <div style={{ marginBottom: "12px" }}>
-                <label style={{ display: "block", fontSize: "12px", fontWeight: 700, color: "var(--fg-secondary)", marginBottom: "6px" }}>
-                  หมวดหมู่สิ่งของ *
-                </label>
-                <select
-                  required
-                  value={editCategory}
-                  onChange={(e) => setEditCategory(e.target.value)}
-                  style={{
-                    width: "100%", padding: "10px 12px", borderRadius: "10px",
-                    border: "1.5px solid var(--border)", fontSize: "12px", outline: "none",
-                    boxSizing: "border-box", backgroundColor: "var(--bg-subtle)", color: "var(--fg)",
-                    cursor: "pointer",
-                  }}
-                >
-                  <option value="" disabled>
-                    เลือกหมวดหมู่...
+                <option value="">— ไม่ระบุ / ไม่แน่ใจ —</option>
+                {myLostPosts.map((p) => (
+                  <option key={p.id} value={p.id}>
+                    {p.title || "ไม่ระบุชื่อ"} · {p.locationName || p.building || "ไม่ระบุสถานที่"}
                   </option>
-                  {ITEM_CATEGORIES.map((cat) => (
-                    <option key={cat} value={cat}>{cat}</option>
-                  ))}
-                </select>
-              </div>
-
-              <div style={{ marginBottom: "12px" }}>
-                <label style={{ display: "block", fontSize: "12px", fontWeight: 700, color: "var(--fg-secondary)", marginBottom: "6px" }}>
-                  ชื่อสิ่งของ *
-                </label>
-                <input
-                  type="text"
-                  required
-                  value={editTitle}
-                  onChange={(e) => setEditTitle(e.target.value)}
-                  placeholder="เช่น กระติกน้ำสีฟ้า, กุญแจพร้อมสายคล้อง"
-                  style={{
-                    width: "100%", padding: "10px 12px", borderRadius: "10px",
-                    border: "1.5px solid var(--border)", fontSize: "12px", outline: "none",
-                    boxSizing: "border-box", backgroundColor: "var(--bg-subtle)", color: "var(--fg)",
-                  }}
-                />
-              </div>
-
-              <div style={{ marginBottom: "12px" }}>
-                <label style={{ display: "block", fontSize: "12px", fontWeight: 700, color: "var(--fg-secondary)", marginBottom: "6px" }}>
-                  สถานที่ / ตึกเรียน *
-                </label>
-                <div ref={editLocationDropdownRef} style={{ position: "relative" }}>
-                  <div
-                    onClick={() => setEditLocationOpen((o) => !o)}
-                    style={{
-                      width: "100%", padding: "10px 12px", borderRadius: "10px",
-                      border: "1.5px solid var(--border)", fontSize: "12px", outline: "none",
-                      boxSizing: "border-box", backgroundColor: "var(--bg-subtle)",
-                      color: editLocation ? "var(--fg)" : "var(--fg-faint)",
-                      cursor: "pointer", display: "flex", justifyContent: "space-between", alignItems: "center",
-                    }}
-                  >
-                    <span>{editLocation || "คลิกเพื่อเลือกหรือพิมพ์ค้นหาตึกเรียน/สถานที่..."}</span>
-                    <ChevronDown size={15} color="var(--fg-muted)" />
+                ))}
+              </select>
+            )}
+            {selectedMyLostPost && (
+              <div style={{
+                marginTop: "8px", display: "flex", alignItems: "center", gap: "10px",
+                padding: "10px", borderRadius: "10px",
+                border: "1px solid var(--border)", backgroundColor: "var(--bg-subtle)",
+              }}>
+                {getPostCover(selectedMyLostPost) ? (
+                  <img
+                    src={getPostCover(selectedMyLostPost) || undefined}
+                    alt=""
+                    style={{ width: 48, height: 48, borderRadius: 9, objectFit: "cover", flexShrink: 0 }}
+                  />
+                ) : (
+                  <div style={{
+                    width: 48, height: 48, borderRadius: 9, flexShrink: 0,
+                    display: "flex", alignItems: "center", justifyContent: "center",
+                    background: "var(--bg-card)", border: "1px solid var(--border)",
+                  }}>
+                    <Package size={18} color="var(--fg-faint)" />
                   </div>
+                )}
+                <div style={{ minWidth: 0, flex: 1 }}>
+                  <div style={{ fontSize: "13px", fontWeight: 700, color: "var(--fg)", lineHeight: 1.4 }}>
+                    {selectedMyLostPost.title || "ไม่ระบุชื่อ"}
+                  </div>
+                  <div style={{ fontSize: "11.5px", color: "var(--fg-faint)", marginTop: "2px" }}>
+                    จับคู่กับโพสต์ของที่พบนี้แล้ว
+                  </div>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setClaimMatchedPostId("")}
+                  aria-label="ล้างการเลือกโพสต์ที่จับคู่"
+                  style={{
+                    width: 32, height: 32, borderRadius: "50%", flexShrink: 0,
+                    background: "var(--bg-card)", border: "1px solid var(--border)",
+                    color: "var(--fg-muted)", cursor: "pointer",
+                    display: "flex", alignItems: "center", justifyContent: "center",
+                  }}
+                >
+                  <X size={14} />
+                </button>
+              </div>
+            )}
+          </div>
 
-                  {editLocationOpen && (
-                    <div
+          <div>
+            <label style={{ display: "block", fontSize: "13.5px", fontWeight: 700, color: "var(--fg-secondary)", marginBottom: "6px" }}>
+              รายละเอียดสิ่งของ (เพิ่มเติม)
+            </label>
+            <textarea
+              rows={3}
+              value={claimNote}
+              onChange={(e) => setClaimNote(e.target.value)}
+              placeholder="ระบุตำหนิ รายละเอียดที่พอจำได้ หรือหลักฐานยืนยันตัวตน"
+              style={{
+                width: "100%", padding: "10px 12px", borderRadius: "10px",
+                border: "1.5px solid var(--border)", fontSize: "13.5px", outline: "none",
+                boxSizing: "border-box", fontFamily: "inherit", resize: "none", lineHeight: 1.6,
+                backgroundColor: "var(--bg-subtle)", color: "var(--fg)",
+                transition: "border-color 0.15s",
+              }}
+            />
+          </div>
+
+          <div>
+            <label style={{ display: "block", fontSize: "13.5px", fontWeight: 700, color: "var(--fg-secondary)", marginBottom: "6px" }}>
+              รูปหลักฐานความเป็นเจ้าของ (ถ้ามี)
+            </label>
+            <input
+              type="file"
+              accept="image/*"
+              onChange={handleEvidenceFileSelect}
+              style={{ display: "none" }}
+              id="claim-evidence-upload"
+            />
+            {claimEvidenceUrl ? (
+              <div style={{ position: "relative", borderRadius: "12px", overflow: "hidden", border: "1.5px solid var(--border)" }}>
+                <img src={claimEvidenceUrl} alt="หลักฐาน" style={{ width: "100%", height: "160px", objectFit: "cover", display: "block" }} />
+                <button
+                  type="button"
+                  aria-label="ลบรูปหลักฐาน"
+                  onClick={() => { setClaimEvidenceFile(null); setClaimEvidenceUrl(""); }}
+                  style={{
+                    position: "absolute", top: 8, right: 8, width: 40, height: 40, borderRadius: "50%",
+                    background: "rgba(0,0,0,0.6)", border: "none", color: "#fff",
+                    display: "flex", alignItems: "center", justifyContent: "center", cursor: "pointer",
+                  }}
+                >
+                  <X size={15} />
+                </button>
+              </div>
+            ) : (
+              <label
+                htmlFor="claim-evidence-upload"
+                style={{
+                  display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center",
+                  minHeight: "96px", padding: "18px 16px", borderRadius: "12px", cursor: "pointer",
+                  border: "1.5px dashed var(--border-strong)", backgroundColor: "var(--bg-subtle)",
+                  color: "var(--fg-muted)", fontSize: "13.5px", fontWeight: 600, gap: "6px", textAlign: "center",
+                  transition: "border-color 0.15s",
+                }}
+              >
+                <ImagePlus size={24} color="var(--fg-accent)" />
+                แตะเพื่อเลือกรูปหลักฐาน
+                <span style={{ fontSize: "12px", color: "var(--fg-faint)" }}>PNG, JPG สูงสุด 5MB</span>
+              </label>
+            )}
+          </div>
+
+          {/* ปุ่มนัดวัน-เวลามารับของ (ไม่บังคับ) */}
+          <div>
+            <label
+              htmlFor="claim-pickup-trigger"
+              style={{ display: "block", fontSize: "13.5px", fontWeight: 700, color: "var(--fg-secondary)", marginBottom: "6px" }}
+            >
+              นัดวัน-เวลามารับของ{" "}
+              <span style={{ color: "var(--fg-faint)", fontWeight: 500 }}>
+                (ไม่บังคับ · เปิดรับ 07:00-16:00 ภายใน 3 วัน · ถ้าไม่เลือกคำขอมีอายุ 24 ชม.)
+              </span>
+            </label>
+
+            {/* ปุ่มหลัก: กดเพื่อเปิด/ปิดช่องเลือกวันและเวลา */}
+            <button
+              id="claim-pickup-trigger"
+              type="button"
+              onClick={() => setShowPickupPicker((v) => !v)}
+              aria-expanded={showPickupPicker}
+              style={{
+                width: "100%", minHeight: "48px", padding: "11px 14px", borderRadius: "10px",
+                border: pickupError ? "1.5px solid var(--danger)" : "1.5px solid var(--accent)",
+                fontSize: "14px", fontWeight: 700, outline: "none", cursor: "pointer",
+                boxSizing: "border-box", textAlign: "left",
+                backgroundColor: claimPickupDate ? "var(--accent-soft)" : "var(--bg-subtle)",
+                color: claimPickupDate ? "var(--fg)" : "var(--fg-muted)",
+                display: "flex", alignItems: "center", justifyContent: "space-between", gap: "10px",
+              }}
+            >
+              <span style={{ display: "flex", alignItems: "center", gap: "9px", minWidth: 0 }}>
+                <Calendar size={17} color="var(--fg-accent)" style={{ flexShrink: 0 }} />
+                <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                  {claimPickupDate
+                    ? formatPickupForDisplay(claimPickupDate)
+                    : "กดเพื่อเลือกวันและเวลาที่สะดวกมารับ"}
+                </span>
+              </span>
+              <ChevronDown
+                size={17}
+                color="var(--fg-faint)"
+                style={{ flexShrink: 0, transform: showPickupPicker ? "rotate(180deg)" : "none", transition: "transform 0.15s" }}
+              />
+            </button>
+
+            {pickupError && (
+              <div style={{ display: "flex", alignItems: "center", gap: "6px", fontSize: "12.5px", color: "var(--danger)", marginTop: "6px", fontWeight: 600 }}>
+                <AlertCircle size={13} style={{ flexShrink: 0 }} />
+                {pickupError}
+              </div>
+            )}
+
+            {showPickupPicker && (
+              <div
+                style={{
+                  marginTop: "10px", padding: "12px", borderRadius: "12px",
+                  border: "1.5px solid var(--border)", backgroundColor: "var(--bg-subtle)",
+                }}
+              >
+                {/* ตัวเลือกลัด — ค่าคำนวณให้อยู่ใน 07:00-16:00 และไม่เกิน 3 วันเสมอ */}
+                <div style={{ fontSize: "12.5px", fontWeight: 700, color: "var(--fg-secondary)", marginBottom: "8px" }}>
+                  เลือกแบบเร็ว
+                </div>
+                <div style={{ display: "flex", flexWrap: "wrap", gap: "8px" }}>
+                  {(() => {
+                    const quickValues = [0, 1, 1, 2].map((days, i) =>
+                      buildPickupValue(days, i === 2 ? "14:00" : "10:00")
+                    );
+                    const unique = quickValues.filter(
+                      (v, i, arr): v is string => Boolean(v) && arr.indexOf(v) === i
+                    );
+                    if (!unique.length) {
+                      return (
+                        <div style={{ fontSize: "12.5px", color: "var(--fg-faint)" }}>
+                          ไม่มีช่วงเวลาที่รับได้แล้ว กรุณาเลือกวัน-เวลาเอง
+                        </div>
+                      );
+                    }
+                    return unique.map((value) => {
+                      const active = claimPickupDate === value;
+                      return (
+                        <button
+                          key={value}
+                          type="button"
+                          onClick={() => setClaimPickupDate(value)}
+                          style={{
+                            padding: "8px 12px", borderRadius: 999, fontSize: "12.5px", fontWeight: 700,
+                            cursor: "pointer", backgroundColor: active ? "var(--accent)" : "var(--bg-card)",
+                            color: active ? "var(--accent-fg)" : "var(--fg-secondary)",
+                            border: active ? "1.5px solid var(--accent)" : "1.5px solid var(--border)",
+                          }}
+                        >
+                          {formatPickupForDisplay(value)}
+                        </button>
+                      );
+                    });
+                  })()}
+                </div>
+
+                {/* ช่องเลือกวัน และ เวลา */}
+                <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "10px", marginTop: "14px" }}>
+                  <div>
+                    <label htmlFor="claim-pickup-date" style={{ display: "block", fontSize: "12.5px", fontWeight: 700, color: "var(--fg-secondary)", marginBottom: "6px" }}>
+                      วันที่
+                    </label>
+                    <input
+                      id="claim-pickup-date"
+                      type="date"
+                      value={pickupDatePart}
+                      min={pickupWindow.min.slice(0, 10)}
+                      max={pickupWindow.max.slice(0, 10)}
+                      onChange={(e) => {
+                        const d = e.target.value;
+                        if (!d) {
+                          setClaimPickupDate("");
+                          return;
+                        }
+                        // เวลาเริ่มต้นของวันใหม่ต้องอยู่ใน 07:00-16:00 เสมอ
+                        setClaimPickupDate(
+                          toLocalDateTimeInput(clampPickupTimeOfDay(new Date(`${d}T${pickupTimePart || "10:00"}`)))
+                        );
+                      }}
                       style={{
-                        position: "absolute", top: "100%", left: 0, right: 0,
-                        backgroundColor: "var(--bg-card)",
-                        border: "1px solid var(--border-strong)",
-                        borderRadius: "12px", boxShadow: "0 12px 32px rgba(0,0,0,0.6)",
-                        zIndex: 30, marginTop: "6px", padding: "10px",
-                        display: "flex", flexDirection: "column", gap: "6px",
+                        width: "100%", minHeight: "44px", padding: "10px 12px", borderRadius: "10px",
+                        border: "1.5px solid var(--border)", fontSize: "13.5px", outline: "none",
+                        boxSizing: "border-box", backgroundColor: "var(--bg-card)", color: "var(--fg)",
+                        colorScheme: "dark",
+                      }}
+                    />
+                  </div>
+                  <div>
+                    <label htmlFor="claim-pickup-time" style={{ display: "block", fontSize: "12.5px", fontWeight: 700, color: "var(--fg-secondary)", marginBottom: "6px" }}>
+                      เวลา
+                    </label>
+                    <input
+                      id="claim-pickup-time"
+                      type="time"
+                      value={pickupTimePart}
+                      step={300}
+                      onChange={(e) => {
+                        const t = e.target.value;
+                        if (!t) {
+                          setClaimPickupDate("");
+                          return;
+                        }
+                        // บีบเวลาให้อยู่ใน 07:00-16:00 (เลือกได้เฉพาะช่วงที่จุดรับของเปิด)
+                        const picked = new Date(
+                          `${pickupDatePart || pickupWindow.min.slice(0, 10)}T${t}`
+                        );
+                        if (Number.isNaN(picked.getTime())) return;
+                        setClaimPickupDate(toLocalDateTimeInput(clampPickupTimeOfDay(picked)));
+                      }}
+                      style={{
+                        width: "100%", minHeight: "44px", padding: "10px 12px", borderRadius: "10px",
+                        border: "1.5px solid var(--border)", fontSize: "13.5px", outline: "none",
+                        boxSizing: "border-box", backgroundColor: "var(--bg-card)", color: "var(--fg)",
+                        colorScheme: "dark",
+                      }}
+                    />
+                  </div>
+                </div>
+
+                <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: "10px", marginTop: "12px", flexWrap: "wrap" }}>
+                  <div style={{ fontSize: "12px", color: "var(--fg-faint)", lineHeight: 1.6 }}>
+                    เปิดรับ 07:00-16:00 · นัดได้ภายใน 3 วันนับจากวันนี้
+                    <br />
+                    ตั้งแต่ {pickupWindow.min.replace("T", " ")} ถึง {pickupWindow.max.replace("T", " ")}
+                  </div>
+                  {claimPickupDate && (
+                    <button
+                      type="button"
+                      onClick={() => setClaimPickupDate("")}
+                      style={{
+                        display: "inline-flex", alignItems: "center", gap: "5px", padding: "6px 10px",
+                        borderRadius: 8, fontSize: "12.5px", fontWeight: 700, cursor: "pointer",
+                        backgroundColor: "transparent", color: "var(--fg-muted)", border: "1.5px solid var(--border)",
                       }}
                     >
-                      <div
-                        style={{
-                          display: "flex", alignItems: "center", gap: "8px",
-                          padding: "8px 10px", backgroundColor: "var(--bg-subtle)",
-                          borderRadius: "8px", border: "1px solid var(--border)",
-                        }}
-                      >
-                        <Search size={14} color="var(--fg-accent)" />
-                        <input
-                          type="text"
-                          placeholder="พิมพ์ค้นหาชื่อคณะ อาคาร หรือพื้นที่..."
-                          value={editLocationSearch}
-                          onChange={(e) => setEditLocationSearch(e.target.value)}
-                          autoFocus
-                          style={{
-                            border: "none", background: "transparent", fontSize: "12px",
-                            outline: "none", width: "100%", color: "var(--fg-strong)",
-                          }}
-                        />
-                      </div>
-
-                      <div style={{ maxHeight: "190px", overflowY: "auto", display: "flex", flexDirection: "column", gap: "2px" }}>
-                        {editLocationSearch.trim() &&
-                          !UP_LOCATIONS.map((l) => l.toLowerCase()).includes(editLocationSearch.trim().toLowerCase()) && (
-                            <div
-                              onClick={() => {
-                                setEditLocation(editLocationSearch.trim());
-                                setEditLocationOpen(false);
-                                setEditLocationSearch("");
-                              }}
-                              style={{
-                                padding: "9px 10px", fontSize: "12px", cursor: "pointer",
-                                borderRadius: "4px", backgroundColor: "var(--bg-hover)",
-                                color: "var(--fg-accent)", fontWeight: 600,
-                                borderBottom: "1px dashed var(--border-strong)", marginBottom: "4px",
-                              }}
-                            >
-                              ใช้ข้อความที่พิมพ์ : "{editLocationSearch.trim()}"
-                            </div>
-                          )}
-
-                        {UP_LOCATIONS.map((loc) => {
-                          const visible =
-                            !editLocationSearch.trim() ||
-                            loc.toLowerCase().includes(editLocationSearch.trim().toLowerCase());
-                          if (!visible) return null;
-                          return (
-                            <div
-                              key={loc}
-                              onClick={() => {
-                                setEditLocation(loc);
-                                setEditLocationOpen(false);
-                                setEditLocationSearch("");
-                              }}
-                              style={{
-                                padding: "9px 10px", fontSize: "12px", cursor: "pointer",
-                                borderRadius: "4px",
-                                backgroundColor: editLocation === loc ? "var(--bg-hover)" : "transparent",
-                                color: editLocation === loc ? "var(--fg)" : "var(--fg-secondary)",
-                                fontWeight: editLocation === loc ? 600 : 400,
-                              }}
-                            >
-                              {loc}
-                            </div>
-                          );
-                        })}
-                        {editLocationSearch.trim() &&
-                          UP_LOCATIONS.every(
-                            (l) => !l.toLowerCase().includes(editLocationSearch.trim().toLowerCase())
-                          ) && (
-                          <div style={{ padding: "10px", fontSize: "12px", color: "var(--fg-faint)", textAlign: "center" }}>
-                            ไม่พบสถานที่ "{editLocationSearch.trim()}"
-                          </div>
-                        )}
-                      </div>
-                    </div>
+                      <X size={13} /> ล้าง
+                    </button>
                   )}
                 </div>
               </div>
+            )}
 
-              {item.itemType === "found" && (
-                <div style={{ marginBottom: "12px" }}>
-                  <label style={{ display: "block", fontSize: "12px", fontWeight: 700, color: "var(--fg-secondary)", marginBottom: "6px" }}>
-                    จุดฝาก / จุดคืน *
-                  </label>
+            <div style={{ fontSize: "12px", color: "var(--fg-faint)", marginTop: "8px", lineHeight: 1.6 }}>
+              ระบุวันมารับที่คุณสะดวก คำขอจะถูกจองไว้จนถึงเวลานั้น (ถ้าไม่มาตรงเวลาจะโดนปล่อยให้คนถัดไป)
+            </div>
+          </div>
+        </form>
+      </Dialog>
+
+      {/* Edit Post Modal */}
+      <Dialog
+        open={showEditModal}
+        onClose={() => setShowEditModal(false)}
+        title="แก้ไขโพสต์"
+        icon={Pencil}
+        align="start"
+        maxWidth={460}
+        footer={
+          <>
+            <DialogButton onClick={() => setShowEditModal(false)} disabled={isSavingEdit}>
+              ยกเลิก
+            </DialogButton>
+            <DialogButton type="submit" formId="laf-edit-post" tone="primary" disabled={isSavingEdit} icon={isSavingEdit ? undefined : Pencil}>
+              {isSavingEdit ? "กำลังบันทึก..." : "บันทึก"}
+            </DialogButton>
+          </>
+        }
+      >
+        <form
+          id="laf-edit-post"
+          onSubmit={handleSaveEdit}
+          style={{ display: "flex", flexDirection: "column", gap: "14px" }}
+        >
+          <div>
+            <label style={{ display: "block", fontSize: "13.5px", fontWeight: 700, color: "var(--fg-secondary)", marginBottom: "6px" }}>
+              ประเภท *
+            </label>
+            <select
+              disabled
+              value={item.itemType || item.type || "lost"}
+              style={{
+                width: "100%", minHeight: "46px", padding: "10px 12px", borderRadius: "10px",
+                border: "1.5px solid var(--border)", fontSize: "13.5px", outline: "none",
+                boxSizing: "border-box", backgroundColor: "var(--bg-subtle)", color: "var(--fg-faint)",
+                cursor: "not-allowed", opacity: 0.75,
+              }}
+            >
+              <option value="lost">ของหาย</option>
+              <option value="found">ของที่พบ</option>
+            </select>
+            <div style={{ fontSize: 12, color: "var(--fg-faint)", marginTop: "6px", display: "flex", alignItems: "center", gap: 5 }}>
+              <Lock size={13} /> ไม่สามารถเปลี่ยนประเภทโพสต์หลังประกาศแล้ว
+            </div>
+          </div>
+
+          <div>
+            <label style={{ display: "block", fontSize: "13.5px", fontWeight: 700, color: "var(--fg-secondary)", marginBottom: "6px" }}>
+              หมวดหมู่สิ่งของ *
+            </label>
+            <select
+              required
+              value={editCategory}
+              onChange={(e) => setEditCategory(e.target.value)}
+              style={{
+                width: "100%", minHeight: "46px", padding: "10px 12px", borderRadius: "10px",
+                border: "1.5px solid var(--border)", fontSize: "13.5px", outline: "none",
+                boxSizing: "border-box", backgroundColor: "var(--bg-subtle)", color: "var(--fg)",
+                cursor: "pointer",
+              }}
+            >
+              <option value="" disabled>
+                เลือกหมวดหมู่...
+              </option>
+              {ITEM_CATEGORIES.map((cat) => (
+                <option key={cat} value={cat}>{cat}</option>
+              ))}
+            </select>
+          </div>
+
+          <div>
+            <label style={{ display: "block", fontSize: "13.5px", fontWeight: 700, color: "var(--fg-secondary)", marginBottom: "6px" }}>
+              ชื่อสิ่งของ *
+            </label>
+            <input
+              type="text"
+              required
+              value={editTitle}
+              onChange={(e) => setEditTitle(e.target.value)}
+              placeholder="เช่น กระติกน้ำสีฟ้า, กุญแจพร้อมสายคล้อง"
+              style={{
+                width: "100%", minHeight: "46px", padding: "10px 12px", borderRadius: "10px",
+                border: "1.5px solid var(--border)", fontSize: "13.5px", outline: "none",
+                boxSizing: "border-box", backgroundColor: "var(--bg-subtle)", color: "var(--fg)",
+              }}
+            />
+          </div>
+
+          <div>
+            <label style={{ display: "block", fontSize: "13.5px", fontWeight: 700, color: "var(--fg-secondary)", marginBottom: "6px" }}>
+              สถานที่ / ตึกเรียน *
+            </label>
+            <div ref={editLocationDropdownRef} style={{ position: "relative" }}>
+              <div
+                onClick={() => setEditLocationOpen((o) => !o)}
+                style={{
+                  width: "100%", minHeight: "46px", padding: "10px 12px", borderRadius: "10px",
+                  border: "1.5px solid var(--border)", fontSize: "13.5px", outline: "none",
+                  boxSizing: "border-box", backgroundColor: "var(--bg-subtle)",
+                  color: editLocation ? "var(--fg)" : "var(--fg-faint)",
+                  cursor: "pointer", display: "flex", justifyContent: "space-between", alignItems: "center", gap: "8px",
+                }}
+              >
+                <span>{editLocation || "คลิกเพื่อเลือกหรือพิมพ์ค้นหาตึกเรียน/สถานที่..."}</span>
+                <ChevronDown size={16} color="var(--fg-muted)" style={{ flexShrink: 0 }} />
+              </div>
+
+              {editLocationOpen && (
+                <div
+                  style={{
+                    position: "absolute", top: "100%", left: 0, right: 0,
+                    backgroundColor: "var(--bg-card)",
+                    border: "1px solid var(--border-strong)",
+                    borderRadius: "12px", boxShadow: "0 12px 32px rgba(0,0,0,0.6)",
+                    zIndex: 30, marginTop: "6px", padding: "10px",
+                    display: "flex", flexDirection: "column", gap: "6px",
+                  }}
+                >
                   <div
                     style={{
-                      display: "flex", alignItems: "center", gap: 8,
-                      width: "100%", padding: "10px 12px", borderRadius: "10px",
-                      border: "1.5px solid var(--sc-ok-border)", fontSize: "12px", boxSizing: "border-box",
-                      backgroundColor: "var(--sc-ok-bg)", color: "var(--sc-ok-fg-strong)",
+                      display: "flex", alignItems: "center", gap: "8px",
+                      padding: "8px 10px", backgroundColor: "var(--bg-subtle)",
+                      borderRadius: "8px", border: "1px solid var(--border)",
                     }}
                   >
-                    <Lock size={13} />
-                    <span>{item.depositLocation || "ไม่ระบุจุด"}</span>
+                    <Search size={15} color="var(--fg-accent)" />
+                    <input
+                      type="text"
+                      placeholder="พิมพ์ค้นหาชื่อคณะ อาคาร หรือพื้นที่..."
+                      value={editLocationSearch}
+                      onChange={(e) => setEditLocationSearch(e.target.value)}
+                      autoFocus
+                      style={{
+                        border: "none", background: "transparent", fontSize: "13.5px",
+                        outline: "none", width: "100%", color: "var(--fg-strong)",
+                      }}
+                    />
                   </div>
-                  <div style={{ fontSize: 10.5, color: "var(--fg-faint)", marginTop: 4 }}>
-                    แอดมินอนุมัติจุดนี้แล้ว ไม่สามารถแก้ไขได้ — โปรดติดต่อแอดมินหากต้องการเปลี่ยน
+
+                  <div style={{ maxHeight: "190px", overflowY: "auto", display: "flex", flexDirection: "column", gap: "2px" }}>
+                    {editLocationSearch.trim() &&
+                      !UP_LOCATIONS.map((l) => l.toLowerCase()).includes(editLocationSearch.trim().toLowerCase()) && (
+                        <div
+                          onClick={() => {
+                            setEditLocation(editLocationSearch.trim());
+                            setEditLocationOpen(false);
+                            setEditLocationSearch("");
+                          }}
+                          style={{
+                            padding: "11px 10px", fontSize: "13.5px", cursor: "pointer",
+                            borderRadius: "8px", backgroundColor: "var(--bg-hover)",
+                            color: "var(--fg-accent)", fontWeight: 600,
+                            borderBottom: "1px dashed var(--border-strong)", marginBottom: "4px",
+                          }}
+                        >
+                          ใช้ข้อความที่พิมพ์ : "{editLocationSearch.trim()}"
+                        </div>
+                      )}
+
+                    {UP_LOCATIONS.map((loc) => {
+                      const visible =
+                        !editLocationSearch.trim() ||
+                        loc.toLowerCase().includes(editLocationSearch.trim().toLowerCase());
+                      if (!visible) return null;
+                      return (
+                        <div
+                          key={loc}
+                          onClick={() => {
+                            setEditLocation(loc);
+                            setEditLocationOpen(false);
+                            setEditLocationSearch("");
+                          }}
+                          style={{
+                            padding: "11px 10px", fontSize: "13.5px", cursor: "pointer",
+                            borderRadius: "8px",
+                            backgroundColor: editLocation === loc ? "var(--bg-hover)" : "transparent",
+                            color: editLocation === loc ? "var(--fg)" : "var(--fg-secondary)",
+                            fontWeight: editLocation === loc ? 600 : 400,
+                          }}
+                        >
+                          {loc}
+                        </div>
+                      );
+                    })}
+                    {editLocationSearch.trim() &&
+                      UP_LOCATIONS.every(
+                        (l) => !l.toLowerCase().includes(editLocationSearch.trim().toLowerCase())
+                      ) && (
+                        <div style={{ padding: "12px", fontSize: "13px", color: "var(--fg-faint)", textAlign: "center" }}>
+                          ไม่พบสถานที่ "{editLocationSearch.trim()}"
+                        </div>
+                      )}
                   </div>
                 </div>
               )}
+            </div>
+          </div>
 
-              <div style={{ marginBottom: "12px" }}>
-                <label style={{ display: "block", fontSize: "12px", fontWeight: 700, color: "var(--fg-secondary)", marginBottom: "6px" }}>
-                  รายละเอียดเพิ่มเติม
-                </label>
-                <textarea
-                  rows={3}
-                  value={editDesc}
-                  onChange={(e) => setEditDesc(e.target.value)}
-                  placeholder="สี, ตำหนิ, รายละเอียดที่ช่วยระบุตัว..."
-                  style={{
-                    width: "100%", padding: "10px 12px", borderRadius: "10px",
-                    border: "1.5px solid var(--border)", fontSize: "12px", outline: "none",
-                    boxSizing: "border-box", fontFamily: "inherit", resize: "none",
-                    backgroundColor: "var(--bg-subtle)", color: "var(--fg)",
-                  }}
-                />
+          {item.itemType === "found" && (
+            <div>
+              <label style={{ display: "block", fontSize: "13.5px", fontWeight: 700, color: "var(--fg-secondary)", marginBottom: "6px" }}>
+                จุดฝาก / จุดคืน *
+              </label>
+              <div
+                style={{
+                  display: "flex", alignItems: "center", gap: 8,
+                  width: "100%", minHeight: "46px", padding: "10px 12px", borderRadius: "10px",
+                  border: "1.5px solid var(--sc-ok-border)", fontSize: "13.5px", boxSizing: "border-box",
+                  backgroundColor: "var(--sc-ok-bg)", color: "var(--sc-ok-fg-strong)",
+                }}
+              >
+                <Lock size={14} />
+                <span>{item.depositLocation || "ไม่ระบุจุด"}</span>
               </div>
+              <div style={{ fontSize: 12, color: "var(--fg-faint)", marginTop: "6px", lineHeight: 1.6 }}>
+                แอดมินอนุมัติจุดนี้แล้ว ไม่สามารถแก้ไขได้ — โปรดติดต่อแอดมินหากต้องการเปลี่ยน
+              </div>
+            </div>
+          )}
 
-              <div style={{ marginBottom: "18px" }}>
-                <label style={{ display: "block", fontSize: "12px", fontWeight: 700, color: "var(--fg-secondary)", marginBottom: "6px" }}>
-                  รูปภาพ (เลือกใหม่เท่านั้น ไม่เลือก = ใช้รูปเดิม)
-                </label>
+          <div>
+            <label style={{ display: "block", fontSize: "13.5px", fontWeight: 700, color: "var(--fg-secondary)", marginBottom: "6px" }}>
+              รายละเอียดเพิ่มเติม
+            </label>
+            <textarea
+              rows={3}
+              value={editDesc}
+              onChange={(e) => setEditDesc(e.target.value)}
+              placeholder="สี, ตำหนิ, รายละเอียดที่ช่วยระบุตัว..."
+              style={{
+                width: "100%", padding: "10px 12px", borderRadius: "10px",
+                border: "1.5px solid var(--border)", fontSize: "13.5px", outline: "none",
+                boxSizing: "border-box", fontFamily: "inherit", resize: "none", lineHeight: 1.6,
+                backgroundColor: "var(--bg-subtle)", color: "var(--fg)",
+              }}
+            />
+          </div>
+
+          <div>
+            <label style={{ display: "block", fontSize: "13.5px", fontWeight: 700, color: "var(--fg-secondary)", marginBottom: "6px" }}>
+              รูปภาพ (สูงสุด {MAX_POST_IMAGES} รูป · รูปแรกคือรูปปก)
+            </label>
+
+            {/* รูปที่มีอยู่แล้ว — กดที่รูปเพื่อดูรูปปก ปุ่มลบมุมขวา */}
+            {editImages.length > 0 && (
+              <div
+                style={{
+                  display: "grid",
+                  gridTemplateColumns: "repeat(3, minmax(0, 1fr))",
+                  gap: "8px",
+                  marginBottom: "10px",
+                }}
+              >
+                {editImages.map((src, i) => (
+                  <div
+                    key={`${src.slice(-24)}-${i}`}
+                    style={{
+                      position: "relative",
+                      aspectRatio: "1 / 1",
+                      borderRadius: "12px",
+                      overflow: "hidden",
+                      border: "1px solid var(--border)",
+                      background: "var(--bg-subtle)",
+                    }}
+                  >
+                    <img
+                      src={src}
+                      alt={`รูปที่ ${i + 1}`}
+                      style={{ width: "100%", height: "100%", objectFit: "cover" }}
+                    />
+                    {i === 0 && (
+                      <span style={{
+                        position: "absolute", top: "4px", left: "4px",
+                        padding: "2px 6px", borderRadius: "999px",
+                        background: "rgba(0,0,0,0.66)", color: "#fff",
+                        fontSize: "9.5px", fontWeight: 700, lineHeight: 1.5,
+                      }}>
+                        รูปปก
+                      </span>
+                    )}
+                    <button
+                      type="button"
+                      onClick={() => setEditImages((prev) => prev.filter((_, x) => x !== i))}
+                      aria-label={`ลบรูปที่ ${i + 1}`}
+                      style={{
+                        position: "absolute", top: "4px", right: "4px",
+                        width: "24px", height: "24px", borderRadius: "50%",
+                        background: "rgba(0,0,0,0.62)", color: "#fff", border: "none",
+                        display: "flex", alignItems: "center", justifyContent: "center",
+                        cursor: "pointer",
+                      }}
+                    >
+                      <X size={13} />
+                    </button>
+                  </div>
+                ))}
+              </div>
+            )}
+
+            {/* รูปใหม่ที่เลือกแล้ว (ยังไม่อัปโหลด) */}
+            {editNewFiles.length > 0 && (
+              <div
+                style={{
+                  display: "grid",
+                  gridTemplateColumns: "repeat(3, minmax(0, 1fr))",
+                  gap: "8px",
+                  marginBottom: "10px",
+                }}
+              >
+                {editNewFiles.map((file, i) => (
+                  <div
+                    key={`${file.name}-${i}`}
+                    style={{
+                      position: "relative",
+                      aspectRatio: "1 / 1",
+                      borderRadius: "12px",
+                      overflow: "hidden",
+                      border: "1.5px dashed var(--border-strong)",
+                      background: "var(--bg-subtle)",
+                    }}
+                  >
+                    <img
+                      src={URL.createObjectURL(file)}
+                      alt={`รูปใหม่ที่ ${i + 1}`}
+                      style={{ width: "100%", height: "100%", objectFit: "cover" }}
+                    />
+                    <button
+                      type="button"
+                      onClick={() => setEditNewFiles((prev) => prev.filter((_, x) => x !== i))}
+                      aria-label={`เอารูปใหม่ที่ ${i + 1} ออก`}
+                      style={{
+                        position: "absolute", top: "4px", right: "4px",
+                        width: "24px", height: "24px", borderRadius: "50%",
+                        background: "rgba(0,0,0,0.62)", color: "#fff", border: "none",
+                        display: "flex", alignItems: "center", justifyContent: "center",
+                        cursor: "pointer",
+                      }}
+                    >
+                      <X size={13} />
+                    </button>
+                  </div>
+                ))}
+              </div>
+            )}
+
+            {editImages.length + editNewFiles.length < MAX_POST_IMAGES ? (
+              <label
+                style={{
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "center",
+                  gap: "8px",
+                  padding: "12px",
+                  borderRadius: "12px",
+                  backgroundColor: "var(--bg-subtle)",
+                  border: "1.5px dashed var(--border-strong)",
+                  cursor: "pointer",
+                  fontSize: "13px",
+                  fontWeight: 700,
+                  color: "var(--fg-secondary)",
+                }}
+              >
+                <ImagePlus size={17} color="var(--fg-accent)" />
+                เพิ่มรูปภาพ ({editImages.length + editNewFiles.length}/{MAX_POST_IMAGES})
                 <input
                   type="file"
                   accept="image/*"
-                  onChange={(e) => setEditImageFile(e.target.files?.[0] || null)}
-                  style={{
-                    width: "100%", padding: "10px 12px", borderRadius: "10px",
-                    border: "1.5px solid var(--border)", fontSize: "12px", outline: "none",
-                    boxSizing: "border-box", backgroundColor: "var(--bg-subtle)", color: "var(--fg-secondary)",
+                  multiple
+                  onChange={(e) => {
+                    const picked = Array.from(e.target.files || []);
+                    e.target.value = "";
+                    const room = MAX_POST_IMAGES - editImages.length - editNewFiles.length;
+                    const accepted: File[] = [];
+                    for (const f of picked) {
+                      if (accepted.length >= room) break;
+                      const err = validateImageFile(f);
+                      if (err) {
+                        showToast(err, "info");
+                        continue;
+                      }
+                      accepted.push(f);
+                    }
+                    if (accepted.length > 0) setEditNewFiles((prev) => [...prev, ...accepted]);
                   }}
+                  style={{ display: "none" }}
                 />
-                {!editImageFile && (item.imageUrl || item.image) && (
-                  <img
-                    src={item.imageUrl || item.image || ""}
-                    alt="รูปปัจจุบัน"
-                    style={{ marginTop: "8px", width: "100%", maxHeight: "160px", objectFit: "cover", borderRadius: "12px" }}
-                  />
-                )}
+              </label>
+            ) : (
+              <div style={{ fontSize: "11.5px", color: "var(--fg-muted)" }}>
+                ครบ {MAX_POST_IMAGES} รูปแล้ว · ลบรูปที่ไม่ต้องการเพื่อเพิ่มรูปใหม่
               </div>
-
-              <div style={{ display: "flex", gap: "10px" }}>
-                <button
-                  type="button"
-                  onClick={() => setShowEditModal(false)}
-                  disabled={isSavingEdit}
-                  style={{
-                    flex: 1, padding: "12px", borderRadius: "12px",
-                    border: "1px solid var(--border)", backgroundColor: "var(--bg-subtle)",
-                    color: "var(--fg-secondary)", fontSize: "13px", fontWeight: 700,
-                    cursor: isSavingEdit ? "not-allowed" : "pointer",
-                  }}
-                >
-                  ยกเลิก
-                </button>
-                <button
-                  type="submit"
-                  disabled={isSavingEdit}
-                  style={{
-                    flex: 1, padding: "12px", borderRadius: "12px", border: "none",
-                    background: "linear-gradient(135deg, #7c5cfc 0%, #4f3bd6 100%)",
-                    color: "var(--accent-fg)", fontSize: "13px", fontWeight: 700,
-                    cursor: isSavingEdit ? "not-allowed" : "pointer",
-                    display: "flex", alignItems: "center", justifyContent: "center", gap: "6px",
-                  }}
-                >
-                  {isSavingEdit ? <Loader2 size={15} className="spin" /> : <Pencil size={15} />}
-                  {isSavingEdit ? "กำลังบันทึก..." : "บันทึก"}
-                </button>
-              </div>
-            </form>
+            )}
           </div>
-        </div>
-      )}
+        </form>
+      </Dialog>
 
       {/* Delete Confirmation Modal */}
-      {showDeleteConfirm && (
+      <Dialog
+        open={showDeleteConfirm}
+        onClose={() => setShowDeleteConfirm(false)}
+        title="ยืนยันการลบโพสต์?"
+        icon={Trash2}
+        maxWidth={400}
+        footer={
+          <>
+            <DialogButton onClick={() => setShowDeleteConfirm(false)} disabled={isDeleting}>
+              ยกเลิก
+            </DialogButton>
+            <DialogButton onClick={handleDeletePost} tone="danger" disabled={isDeleting}>
+              {isDeleting ? "กำลังลบ..." : "ยืนยันลบ"}
+            </DialogButton>
+          </>
+        }
+      >
         <div style={{
-          position: "fixed", inset: 0, backgroundColor: "rgba(5,4,10,0.72)",
-          backdropFilter: "blur(6px)",
-          zIndex: 100, display: "flex", alignItems: "center", justifyContent: "center",
-          padding: "20px", animation: "fadeIn 0.2s ease",
+          fontSize: "14.5px",
+          color: "var(--fg-secondary)",
+          lineHeight: 1.65,
         }}>
-          <div style={{
-            backgroundColor: "var(--bg-card)", borderRadius: "20px", padding: "24px",
-            width: "100%", maxWidth: "360px", textAlign: "center",
-            boxShadow: "0 25px 60px rgba(0,0,0,0.6)",
-            border: "1px solid var(--border)",
-          }}>
-            <div style={{ display: "flex", justifyContent: "center", marginBottom: "12px", color: "var(--sc-danger-fg)" }}>
-              <Trash2 size={36} />
-            </div>
-            <h3 style={{ fontSize: "18px", fontWeight: 800, color: "var(--fg)", marginBottom: "8px" }}>
-              ยืนยันการลบโพสต์?
-            </h3>
-            <p style={{ fontSize: "13px", color: "var(--fg-muted)", marginBottom: "20px", lineHeight: "1.6" }}>
-              เมื่อลบโพสต์นี้แล้ว ข้อมูลจะหายไปจากระบบและไม่สามารถกู้คืนได้อีก
-            </p>
-            <div style={{ display: "flex", gap: "10px" }}>
-              <button
-                onClick={() => setShowDeleteConfirm(false)}
-                style={{
-                  flex: 1, padding: "12px", borderRadius: "12px",
-                  border: "1px solid var(--border)", backgroundColor: "var(--bg-subtle)",
-                  color: "var(--fg-secondary)", fontSize: "13px", fontWeight: 700, cursor: "pointer",
-                }}
-              >
-                ยกเลิก
-              </button>
-              <button
-                onClick={handleDeletePost}
-                disabled={isDeleting}
-                style={{
-                  flex: 1, padding: "12px", borderRadius: "12px", border: "none",
-                  backgroundColor: "#dc2626", color: "var(--fg)",
-                  fontSize: "13px", fontWeight: 700,
-                  cursor: isDeleting ? "not-allowed" : "pointer",
-                }}
-              >
-                {isDeleting ? "กำลังลบ..." : "ยืนยันลบ"}
-              </button>
-            </div>
-          </div>
+          เมื่อลบโพสต์นี้แล้ว ข้อมูลจะหายไปจากระบบและไม่สามารถกู้คืนได้อีก
         </div>
-      )}
+      </Dialog>
 
       {/* Report Modal */}
-      {showReportModal && (
-        <div style={{
-          position: "fixed", inset: 0, backgroundColor: "rgba(5,4,10,0.72)",
-          backdropFilter: "blur(6px)",
-          zIndex: 100, display: "flex", alignItems: "center", justifyContent: "center",
-          padding: "20px", animation: "fadeIn 0.2s ease",
-        }}>
-          <div style={{
-            backgroundColor: "var(--bg-card)", borderRadius: "20px", padding: "22px",
-            width: "100%", maxWidth: "400px",
-            boxShadow: "0 25px 60px rgba(0,0,0,0.6)",
-            border: "1px solid var(--border)",
-          }}>
-            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "14px" }}>
-              <div style={{ display: "flex", alignItems: "center", gap: "8px", color: "var(--sc-danger-fg)", fontWeight: 800, fontSize: "16px" }}>
-                <ShieldAlert size={20} />
-                แจ้งสวมสิทธิ์ / คืนผิดคน
-              </div>
-              <button
-                onClick={() => setShowReportModal(false)}
-                style={{
-                  border: "none", background: "var(--bg-hover)", cursor: "pointer",
-                  color: "var(--fg-secondary)", borderRadius: "50%", width: "30px", height: "30px",
-                  display: "flex", alignItems: "center", justifyContent: "center",
-                }}
-              >
-                <X size={18} />
-              </button>
-            </div>
-
-            <p style={{ fontSize: "12px", color: "var(--fg-muted)", marginBottom: "16px", lineHeight: "1.6" }}>
-              หากท่านเป็นเจ้าของทรัพย์สินนี้ แต่มีการส่งมอบให้ผู้อื่นผิดพลาด กรุณาระบุรายละเอียด
-              เรื่องจะถูกส่งให้เจ้าหน้าที่ตรวจสอบ (โพสต์ยังแสดงตามปกติจนกว่าจะตรวจสอบเสร็จ)
-            </p>
-
-            <form onSubmit={handleReportImpersonation}>
-              <div style={{ marginBottom: "12px" }}>
-                <label style={{ display: "block", fontSize: "12px", fontWeight: 700, color: "var(--fg-secondary)", marginBottom: "6px" }}>
-                  เหตุผล / หลักฐานความเป็นเจ้าของ *
-                </label>
-                <textarea
-                  required
-                  rows={3}
-                  value={reportReason}
-                  onChange={(e) => setReportReason(e.target.value)}
-                  placeholder="ระบุ เช่น มีตำหนิตรงไหน, หลักฐานการเป็นเจ้าของ..."
-                  style={{
-                    width: "100%", padding: "10px 12px", borderRadius: "10px",
-                    border: "1.5px solid var(--border)", fontSize: "12px", outline: "none",
-                    boxSizing: "border-box", fontFamily: "inherit", resize: "none",
-                    backgroundColor: "var(--bg-subtle)", color: "var(--fg)",
-                  }}
-                />
-              </div>
-
-              <div style={{ marginBottom: "18px" }}>
-                <label style={{ display: "block", fontSize: "12px", fontWeight: 700, color: "var(--fg-secondary)", marginBottom: "6px" }}>
-                  เบอร์ติดต่อกลับ / Line ID
-                </label>
-                <input
-                  type="text"
-                  value={reporterContact}
-                  onChange={(e) => setReporterContact(e.target.value)}
-                  placeholder="สำหรับเจ้าหน้าที่ติดต่อกลับ"
-                  style={{
-                    width: "100%", padding: "10px 12px", borderRadius: "10px",
-                    border: "1.5px solid var(--border)", fontSize: "12px", outline: "none",
-                    boxSizing: "border-box", backgroundColor: "var(--bg-subtle)", color: "var(--fg)",
-                  }}
-                />
-              </div>
-
-              <div style={{ display: "flex", gap: "10px" }}>
-                <button
-                  type="button"
-                  onClick={() => setShowReportModal(false)}
-                  style={{
-                    flex: 1, padding: "11px", borderRadius: "10px",
-                    border: "1px solid var(--border)", backgroundColor: "var(--bg-subtle)",
-                    color: "var(--fg-secondary)", fontSize: "13px", fontWeight: 700, cursor: "pointer",
-                  }}
-                >
-                  ยกเลิก
-                </button>
-                <button
-                  type="submit"
-                  disabled={isSubmitting}
-                  style={{
-                    flex: 1, padding: "11px", borderRadius: "10px", border: "none",
-                    backgroundColor: "#dc2626", color: "var(--fg)",
-                    fontSize: "13px", fontWeight: 700, cursor: "pointer",
-                    display: "flex", alignItems: "center", justifyContent: "center", gap: "6px",
-                  }}
-                >
-                  <Send size={14} />
-                  {isSubmitting ? "กำลังส่ง..." : "ส่งเรื่องท้วง"}
-                </button>
-              </div>
-            </form>
+      <Dialog
+        open={showReportModal}
+        onClose={() => setShowReportModal(false)}
+        title="แจ้งสวมสิทธิ์ / คืนผิดคน"
+        subtitle="หากท่านเป็นเจ้าของทรัพย์สินนี้ แต่มีการส่งมอบให้ผู้อื่นผิดพลาด กรุณาระบุรายละเอียด เรื่องจะถูกส่งให้เจ้าหน้าที่ตรวจสอบ (โพสต์ยังแสดงตามปกติจนกว่าจะตรวจสอบเสร็จ)"
+        icon={ShieldAlert}
+        align="start"
+        maxWidth={460}
+        footer={
+          <>
+            <DialogButton onClick={() => setShowReportModal(false)} disabled={isSubmitting}>
+              ยกเลิก
+            </DialogButton>
+            <DialogButton type="submit" formId="laf-report-impersonation" tone="danger" disabled={isSubmitting} icon={Send}>
+              {isSubmitting ? "กำลังส่ง..." : "ส่งเรื่องท้วง"}
+            </DialogButton>
+          </>
+        }
+      >
+        <form id="laf-report-impersonation" onSubmit={handleReportImpersonation}>
+          <div style={{ marginBottom: "14px" }}>
+            <label style={{ display: "block", fontSize: "13px", fontWeight: 700, color: "var(--fg-secondary)", marginBottom: "6px" }}>
+              เหตุผล / หลักฐานความเป็นเจ้าของ *
+            </label>
+            <textarea
+              required
+              rows={3}
+              value={reportReason}
+              onChange={(e) => setReportReason(e.target.value)}
+              placeholder="ระบุ เช่น มีตำหนิตรงไหน, หลักฐานการเป็นเจ้าของ..."
+              style={{
+                width: "100%", padding: "10px 12px", borderRadius: "10px",
+                border: "1.5px solid var(--border)", fontSize: "14px", outline: "none",
+                boxSizing: "border-box", fontFamily: "inherit", resize: "none",
+                backgroundColor: "var(--bg-subtle)", color: "var(--fg)",
+              }}
+            />
           </div>
-        </div>
-      )}
+
+          <div>
+            <label style={{ display: "block", fontSize: "13px", fontWeight: 700, color: "var(--fg-secondary)", marginBottom: "6px" }}>
+              เบอร์ติดต่อกลับ / Line ID
+            </label>
+            <input
+              type="text"
+              value={reporterContact}
+              onChange={(e) => setReporterContact(e.target.value)}
+              placeholder="สำหรับเจ้าหน้าที่ติดต่อกลับ"
+              style={{
+                width: "100%", padding: "10px 12px", borderRadius: "10px",
+                border: "1.5px solid var(--border)", fontSize: "14px", outline: "none",
+                boxSizing: "border-box", backgroundColor: "var(--bg-subtle)", color: "var(--fg)",
+              }}
+            />
+          </div>
+        </form>
+      </Dialog>
 
       {/* Image Viewer Modal */}
-      {showImageViewer && (item.imageUrl || item.image) && (
+      {showImageViewer && postImages.length > 0 && (
         <div
           onClick={() => setShowImageViewer(false)}
           style={{
@@ -2326,6 +2822,7 @@ export default function ItemDetail({ item: initialItem, onBack, currentUser, onS
             display: "flex",
             alignItems: "center",
             justifyContent: "center",
+            padding: "max(12px, env(safe-area-inset-top, 0px)) 12px max(12px, env(safe-area-inset-bottom, 0px))",
             animation: "fadeIn 0.2s ease",
           }}
         >
@@ -2336,8 +2833,8 @@ export default function ItemDetail({ item: initialItem, onBack, currentUser, onS
             }}
             style={{
               position: "absolute",
-              top: "16px",
-              right: "16px",
+              top: "max(12px, env(safe-area-inset-top, 0px))",
+              right: "12px",
               width: "40px",
               height: "40px",
               borderRadius: "50%",
@@ -2357,144 +2854,194 @@ export default function ItemDetail({ item: initialItem, onBack, currentUser, onS
 
           <div style={{ maxWidth: "100%", maxHeight: "100%", textAlign: "center", padding: "24px" }}>
             <img
-              src={item.imageUrl || item.image || undefined}
+              src={postImages[viewerSafe]}
               alt={item.title}
+              className="lightbox-cap"
               style={{
                 maxWidth: "100%",
-                maxHeight: "calc(100vh - 140px)",
+                maxHeight: "calc(100dvh - 140px)",
                 borderRadius: "12px",
                 objectFit: "contain",
                 boxShadow: "0 20px 60px rgba(0,0,0,0.6)",
               }}
+              {...(postImages.length > 1 ? viewerSwipe : {})}
             />
             <div style={{ marginTop: "16px", display: "flex", alignItems: "center", justifyContent: "center", gap: "8px", color: "var(--fg-secondary)", fontSize: "13px", fontWeight: 600 }}>
               <ZoomIn size={15} />
               {item.title}
+              {postImages.length > 1 && (
+                <span style={{ color: "#fff" }}>
+                  ({viewerSafe + 1}/{postImages.length})
+                </span>
+              )}
             </div>
+
+            {/* ลูกศรเลื่อนรูปใน lightbox */}
+            {postImages.length > 1 &&
+              ([-1, 1] as const).map((dir) => (
+                <button
+                  key={dir}
+                  type="button"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    goViewer(viewerSafe + dir);
+                  }}
+                  aria-label={dir === -1 ? "รูปก่อนหน้า" : "รูปถัดไป"}
+                  style={{
+                    position: "absolute",
+                    top: "50%",
+                    [dir === -1 ? "left" : "right"]: "12px",
+                    transform: "translateY(-50%)",
+                    width: "42px",
+                    height: "42px",
+                    borderRadius: "50%",
+                    border: "1px solid rgba(255,255,255,0.3)",
+                    background: "rgba(0,0,0,0.5)",
+                    color: "#fff",
+                    display: "flex",
+                    alignItems: "center",
+                    justifyContent: "center",
+                    cursor: "pointer",
+                    zIndex: 2,
+                  }}
+                >
+                  {dir === -1 ? <ChevronLeft size={22} /> : <ChevronRight size={22} />}
+                </button>
+              ))}
+
+            {/* ทริครูปย่อ */}
+            {postImages.length > 1 && (
+              <div
+                style={{
+                  marginTop: "14px",
+                  display: "flex",
+                  justifyContent: "center",
+                  gap: "8px",
+                  flexWrap: "wrap",
+                }}
+              >
+                {postImages.map((src, i) => (
+                  <button
+                    key={`${src.slice(-24)}-${i}`}
+                    type="button"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      setViewerIndex(i);
+                    }}
+                    aria-label={`ดูรูปที่ ${i + 1}`}
+                    style={{
+                      width: "52px",
+                      height: "52px",
+                      padding: 0,
+                      borderRadius: "10px",
+                      overflow: "hidden",
+                      cursor: "pointer",
+                      border:
+                        i === viewerSafe
+                          ? "2px solid #7c5cfc"
+                          : "2px solid rgba(255,255,255,0.2)",
+                      background: "transparent",
+                      opacity: i === viewerSafe ? 1 : 0.6,
+                    }}
+                  >
+                    <img
+                      src={src}
+                      alt={`รูปที่ ${i + 1}`}
+                      style={{ width: "100%", height: "100%", objectFit: "cover" }}
+                    />
+                  </button>
+                ))}
+              </div>
+            )}
           </div>
         </div>
       )}
 
       {/* General Report Modal */}
-      {showGeneralReportModal && (
-        <div style={{
-          position: "fixed", inset: 0, backgroundColor: "rgba(5,4,10,0.72)",
-          backdropFilter: "blur(6px)",
-          zIndex: 100, display: "flex", alignItems: "center", justifyContent: "center",
-          padding: "20px", animation: "fadeIn 0.2s ease",
-        }}>
-          <div style={{
-            backgroundColor: "var(--bg-card)", borderRadius: "20px", padding: "22px",
-            width: "100%", maxWidth: "400px",
-            boxShadow: "0 25px 60px rgba(0,0,0,0.6)",
-            border: "1px solid var(--border)",
-          }}>
-            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "14px" }}>
-              <div style={{ display: "flex", alignItems: "center", gap: "8px", color: "var(--sc-danger-fg)", fontWeight: 800, fontSize: "16px" }}>
-                <Flag size={20} />
-                รายงานโพสต์
-              </div>
-              <button
-                onClick={() => {
-                  setShowGeneralReportModal(false);
-                  setGeneralReportDetail("");
-                  setGeneralReportCategory("เนื้อหาไม่เหมาะสม");
-                }}
-                style={{
-                  border: "none", background: "var(--bg-hover)", cursor: "pointer",
-                  color: "var(--fg-secondary)", borderRadius: "50%", width: "30px", height: "30px",
-                  display: "flex", alignItems: "center", justifyContent: "center",
-                }}
-              >
-                <X size={18} />
-              </button>
-            </div>
-
-            <p style={{ fontSize: "12px", color: "var(--fg-muted)", marginBottom: "14px", lineHeight: "1.6" }}>
-              หากโพสต์นี้มีเนื้อหาที่ไม่เหมาะสม ข้อมูลเท็จ หรือสแปม โปรดแจ้งให้แอดมินทราบ
-            </p>
-
-            <form onSubmit={handleGeneralReport}>
-              {/* เลือกหมวดหมู่ */}
-              <div style={{ marginBottom: "12px" }}>
-                <label style={{ display: "block", fontSize: "12px", fontWeight: 700, color: "var(--fg-secondary)", marginBottom: "6px" }}>
-                  หมวดหมู่รายงาน *
-                </label>
-                <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
-                  {GENERAL_REPORT_CATEGORIES.map((cat) => (
-                    <button
-                      key={cat}
-                      type="button"
-                      onClick={() => setGeneralReportCategory(cat)}
-                      style={{
-                        padding: "5px 10px", borderRadius: 8, fontSize: "11px", fontWeight: 600,
-                        border: "1px solid",
-                        borderColor: generalReportCategory === cat ? "var(--sc-danger-fg)" : "var(--border)",
-                        background: generalReportCategory === cat ? "rgba(248,113,113,0.12)" : "var(--bg-card)",
-                        color: generalReportCategory === cat ? "var(--sc-danger-fg)" : "var(--fg-muted)",
-                        cursor: "pointer",
-                      }}
-                    >
-                      {cat}
-                    </button>
-                  ))}
-                </div>
-              </div>
-
-              {/* รายละเอียด */}
-              <div style={{ marginBottom: "16px" }}>
-                <label style={{ display: "block", fontSize: "12px", fontWeight: 700, color: "var(--fg-secondary)", marginBottom: "6px" }}>
-                  รายละเอียดเพิ่มเติม (ถ้ามี)
-                </label>
-                <textarea
-                  rows={3}
-                  value={generalReportDetail}
-                  onChange={(e) => setGeneralReportDetail(e.target.value)}
-                  placeholder="อธิบายปัญหาที่พบ..."
-                  style={{
-                    width: "100%", padding: "10px 12px", borderRadius: "10px",
-                    border: "1.5px solid var(--border)", fontSize: "12px", outline: "none",
-                    boxSizing: "border-box", fontFamily: "inherit", resize: "none",
-                    backgroundColor: "var(--bg-subtle)", color: "var(--fg)",
-                  }}
-                />
-              </div>
-
-              <div style={{ display: "flex", gap: "10px" }}>
+      <Dialog
+        open={showGeneralReportModal}
+        onClose={() => {
+          setShowGeneralReportModal(false);
+          setGeneralReportDetail("");
+          setGeneralReportCategory("เนื้อหาไม่เหมาะสม");
+        }}
+        title="รายงานโพสต์"
+        subtitle="หากโพสต์นี้มีเนื้อหาที่ไม่เหมาะสม ข้อมูลเท็จ หรือสแปม โปรดแจ้งให้แอดมินทราบ"
+        icon={Flag}
+        align="start"
+        maxWidth={460}
+        footer={
+          <>
+            <DialogButton
+              onClick={() => {
+                setShowGeneralReportModal(false);
+                setGeneralReportDetail("");
+                setGeneralReportCategory("เนื้อหาไม่เหมาะสม");
+              }}
+              disabled={isSubmittingGeneralReport}
+            >
+              ยกเลิก
+            </DialogButton>
+            <DialogButton
+              type="submit"
+              formId="laf-report-general"
+              tone="danger"
+              disabled={isSubmittingGeneralReport}
+              icon={Send}
+            >
+              {isSubmittingGeneralReport ? "กำลังส่ง..." : "ส่งรายงาน"}
+            </DialogButton>
+          </>
+        }
+      >
+        <form id="laf-report-general" onSubmit={handleGeneralReport}>
+          {/* เลือกหมวดหมู่ */}
+          <div style={{ marginBottom: "14px" }}>
+            <label style={{ display: "block", fontSize: "13px", fontWeight: 700, color: "var(--fg-secondary)", marginBottom: "8px" }}>
+              หมวดหมู่รายงาน *
+            </label>
+            <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
+              {GENERAL_REPORT_CATEGORIES.map((cat) => (
                 <button
+                  key={cat}
                   type="button"
-                  onClick={() => {
-                    setShowGeneralReportModal(false);
-                    setGeneralReportDetail("");
-                    setGeneralReportCategory("เนื้อหาไม่เหมาะสม");
-                  }}
+                  onClick={() => setGeneralReportCategory(cat)}
                   style={{
-                    flex: 1, padding: "11px", borderRadius: "10px",
-                    border: "1px solid var(--border)", backgroundColor: "var(--bg-subtle)",
-                    color: "var(--fg-secondary)", fontSize: "13px", fontWeight: 700, cursor: "pointer",
+                    padding: "8px 12px", borderRadius: 8, fontSize: "13px", fontWeight: 600,
+                    border: "1px solid",
+                    borderColor: generalReportCategory === cat ? "var(--sc-danger-fg)" : "var(--border)",
+                    background: generalReportCategory === cat ? "rgba(248,113,113,0.12)" : "var(--bg-card)",
+                    color: generalReportCategory === cat ? "var(--sc-danger-fg)" : "var(--fg-muted)",
+                    cursor: "pointer",
+                    minHeight: "40px",
                   }}
                 >
-                  ยกเลิก
+                  {cat}
                 </button>
-                <button
-                  type="submit"
-                  disabled={isSubmittingGeneralReport}
-                  style={{
-                    flex: 1, padding: "11px", borderRadius: "10px", border: "none",
-                    backgroundColor: "#dc2626", color: "#fff",
-                    fontSize: "13px", fontWeight: 700, cursor: isSubmittingGeneralReport ? "not-allowed" : "pointer",
-                    display: "flex", alignItems: "center", justifyContent: "center", gap: "6px",
-                    opacity: isSubmittingGeneralReport ? 0.7 : 1,
-                  }}
-                >
-                  <Send size={14} />
-                  {isSubmittingGeneralReport ? "กำลังส่ง..." : "ส่งรายงาน"}
-                </button>
-              </div>
-            </form>
+              ))}
+            </div>
           </div>
-        </div>
-      )}
+
+          {/* รายละเอียด */}
+          <div>
+            <label style={{ display: "block", fontSize: "13px", fontWeight: 700, color: "var(--fg-secondary)", marginBottom: "6px" }}>
+              รายละเอียดเพิ่มเติม (ถ้ามี)
+            </label>
+            <textarea
+              rows={3}
+              value={generalReportDetail}
+              onChange={(e) => setGeneralReportDetail(e.target.value)}
+              placeholder="อธิบายปัญหาที่พบ..."
+              style={{
+                width: "100%", padding: "10px 12px", borderRadius: "10px",
+                border: "1.5px solid var(--border)", fontSize: "14px", outline: "none",
+                boxSizing: "border-box", fontFamily: "inherit", resize: "none",
+                backgroundColor: "var(--bg-subtle)", color: "var(--fg)",
+              }}
+            />
+          </div>
+        </form>
+      </Dialog>
 
       <ToastContainer />
     </div>
