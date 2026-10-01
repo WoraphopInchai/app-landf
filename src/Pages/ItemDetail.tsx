@@ -126,25 +126,6 @@ const getPickupWindow = () => {
   };
 };
 
-/* ตัวช่วยนัดเวลาแบบลัด: สร้างค่า "YYYY-MM-DDTHH:mm" (เวลาท้องถิ่น) จากจำนวนวันที่เลื่อนไปข้างหน้า
-   และเวลา HH:mm โดยบังคับให้อยู่ใน 07:00-16:00 และไม่เกิน 3 วันนับรวมวันนี้
-   คืน null ถ้าไม่มีช่วงเวลาที่รับได้แล้ว */
-const buildPickupValue = (daysAhead: number, time: string) => {
-  const [h, m] = time.split(":").map((n) => parseInt(n, 10));
-  if (Number.isNaN(h) || Number.isNaN(m)) return null;
-  const d = new Date();
-  d.setDate(d.getDate() + daysAhead);
-  d.setHours(h, m, 0, 0);
-  // เวลาที่เลือกอยู่นอกช่วงเปิดของวันนั้น → ไปวันถัดไปตอนเปิด
-  if (!isPickupTimeAllowed(d)) moveToNextOpenDay(d);
-  // เวลาที่เลยไปแล้ว → เลื่อนไปวันถัดไป
-  while (d.getTime() < Date.now() + 60 * 60 * 1000) {
-    moveToNextOpenDay(d);
-  }
-  if (d.getTime() > getPickupLastDay().getTime()) return null;
-  return toLocalDateTimeInput(d);
-};
-
 // แสดงวันเวลาที่เลือกนัดแบบอ่านง่าย (เช่น "พรุ่งนี้ 10:00" หรือ "ศ. 3 ต.ค. 10:00")
 const formatPickupForDisplay = (value: string) => {
   const d = new Date(value);
@@ -158,6 +139,50 @@ const formatPickupForDisplay = (value: string) => {
   if (sameDay(d, new Date())) return `วันนี้ ${hhmm}`;
   return d.toLocaleDateString("th-TH", { day: "numeric", month: "short" }) + ` ${hhmm}`;
 };
+
+// ─── ตัวเลือกวัน/ช่วงเวลาสำหรับ UI ใหม่ ────────────────────────────────────────
+// ใช้ปุ่มกดแทน input date/time ของเบราว์เซอร์ เพราะตัวเลือกเวลาบนมือถือกดยากและเลือกนอกเวลาทำการได้
+const PICKUP_SLOT_STEP_MIN = 30;
+/** ช่วงเวลาที่กดได้ในหนึ่งวัน: 07:00 → 16:00 ทีละ 30 นาที */
+const PICKUP_SLOT_MINUTES = (() => {
+  const out: number[] = [];
+  for (let m = PICKUP_OPEN_HOUR * 60; m <= PICKUP_CLOSE_MIN; m += PICKUP_SLOT_STEP_MIN) {
+    out.push(m);
+  }
+  return out;
+})();
+
+const slotLabel = (m: number) =>
+  `${String(Math.floor(m / 60)).padStart(2, "0")}:${String(m % 60).padStart(2, "0")}`;
+
+/** ค่านัด "YYYY-MM-DDTHH:mm" ของวันนั้นในเวลา minutes-of-day */
+const slotValueOn = (day: Date, m: number) => {
+  const d = new Date(day);
+  d.setHours(Math.floor(m / 60), m % 60, 0, 0);
+  return toLocalDateTimeInput(d);
+};
+
+/** วันที่นัดได้ทั้งหมด (วันนี้ → +2 วัน) พร้อมชื่อย่อและเช็คว่ายังมีช่วงเวลาว่างไหม */
+const buildPickupDays = (minMs: number, maxMs: number) =>
+  Array.from({ length: PICKUP_LAST_DAY_OFFSET + 1 }, (_, offset) => {
+    const day = new Date();
+    day.setDate(day.getDate() + offset);
+    day.setHours(0, 0, 0, 0);
+    const key = slotValueOn(day, PICKUP_OPEN_HOUR * 60).slice(0, 10);
+    const slots = PICKUP_SLOT_MINUTES.map((m) => slotValueOn(day, m));
+    const free = slots.filter((v) => {
+      const t = new Date(v).getTime();
+      return t >= minMs && t <= maxMs;
+    });
+    return {
+      key,
+      offset,
+      title: offset === 0 ? "วันนี้" : offset === 1 ? "พรุ่งนี้" : day.toLocaleDateString("th-TH", { weekday: "long" }),
+      dateLabel: day.toLocaleDateString("th-TH", { day: "numeric", month: "short" }),
+      hasFree: free.length > 0,
+      firstFree: free[0] || null,
+    };
+  });
 
 // ปิดคำขอรับของ pending + รายงาน open ของโพสต์ที่ผู้ใช้ลบเอง
 const closeDataForDeletedPost = async (postId: string, postTitle?: string) => {
@@ -486,9 +511,8 @@ export default function ItemDetail({ item: initialItem, onBack, currentUser, onS
   const [pickupWindow, setPickupWindow] = useState(() => getPickupWindow());
   const [showPickupPicker, setShowPickupPicker] = useState(false);
 
-  // แยกวัน/เวลาออกจากค่า "YYYY-MM-DDTHH:mm" เพื่อใช้กับ input type=date / type=time
+  // แยกวันออกจากค่า "YYYY-MM-DDTHH:mm" เพื่อใช้เทียบกับปุ่มวันที่ใน UI
   const pickupDatePart = claimPickupDate.slice(0, 10);
-  const pickupTimePart = claimPickupDate.slice(11, 16);
 
   /* ตรวจว่าเวลานัดที่เลือกอยู่ในช่วงที่ระบบรับได้ (อย่างน้อย 1 ชม. ไม่เกิน 3 วันนับรวมวันนี้ และอยู่ในเวลา 07:00-16:00)
      ใช้ pickupWindow ที่คำนวณตอนเปิดฟอร์ม (อยู่ใน state) เป็นขอบเขต เพื่อไม่เรียก Date.now() ระหว่าง render */
@@ -507,6 +531,40 @@ export default function ItemDetail({ item: initialItem, onBack, currentUser, onS
     }
     return "";
   })();
+
+  // ตัวเลือกวัน + ช่วงเวลาสำหรับ UI เลือกนัด (คำนวณจาก pickupWindow เดียวกับที่ validate)
+  const pickupMinMs = new Date(pickupWindow.min).getTime();
+  const pickupMaxMs = new Date(pickupWindow.max).getTime();
+  const pickupDays = buildPickupDays(pickupMinMs, pickupMaxMs);
+  const selectedPickupDay =
+    pickupDays.find((d) => d.key === pickupDatePart) ||
+    pickupDays.find((d) => d.hasFree) ||
+    pickupDays[0];
+  const pickupSlotsOfDay = PICKUP_SLOT_MINUTES.map((m) => {
+    const value = slotValueOn(new Date(`${selectedPickupDay.key}T00:00:00`), m);
+    const t = new Date(value).getTime();
+    return { value, label: slotLabel(m), disabled: t < pickupMinMs || t > pickupMaxMs };
+  });
+  // ช่วงเช้า/บ่าย แยกกลุ่มให้สแกนง่ายแทนการเห็นช่วงเวลารวดเดียว 19 ช่อง
+  const pickupSlotGroups = [
+    { title: "ช่วงเช้า", from: PICKUP_OPEN_HOUR * 60, to: 12 * 60 - 1 },
+    { title: "ช่วงบ่าย", from: 12 * 60, to: PICKUP_CLOSE_MIN },
+  ]
+    .map((g) => ({
+      ...g,
+      slots: pickupSlotsOfDay.filter((s) => {
+        const m = Number(s.label.slice(0, 2)) * 60 + Number(s.label.slice(3, 5));
+        return m >= g.from && m <= g.to;
+      }),
+    }))
+    .filter((g) => g.slots.length > 0);
+
+  // เลือกวัน → เลือกช่วงเวลาว่างแรกของวันนั้นให้อัตโนมัติ (ลดคลิกที่ต้องทำ)
+  const pickPickupDay = (dayKey: string) => {
+    const day = pickupDays.find((d) => d.key === dayKey);
+    if (!day?.hasFree || !day.firstFree) return;
+    setClaimPickupDate(day.firstFree);
+  };
 
   // เลื่อนด้วยคีย์บอร์ดตอนเปิด lightbox (ปิดด้วย Escape)
   useEffect(() => {
@@ -2191,132 +2249,116 @@ export default function ItemDetail({ item: initialItem, onBack, currentUser, onS
             {showPickupPicker && (
               <div
                 style={{
-                  marginTop: "10px", padding: "12px", borderRadius: "12px",
+                  marginTop: "10px", padding: "14px", borderRadius: "14px",
                   border: "1.5px solid var(--border)", backgroundColor: "var(--bg-subtle)",
                 }}
               >
-                {/* ตัวเลือกลัด — ค่าคำนวณให้อยู่ใน 07:00-16:00 และไม่เกิน 3 วันเสมอ */}
+                {/* เลือกวัน — ปุ่มกดแทน date picker */}
                 <div style={{ fontSize: "12.5px", fontWeight: 700, color: "var(--fg-secondary)", marginBottom: "8px" }}>
-                  เลือกแบบเร็ว
+                  เลือกวัน
                 </div>
-                <div style={{ display: "flex", flexWrap: "wrap", gap: "8px" }}>
-                  {(() => {
-                    const quickValues = [0, 1, 1, 2].map((days, i) =>
-                      buildPickupValue(days, i === 2 ? "14:00" : "10:00")
+                <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: "8px" }}>
+                  {pickupDays.map((day) => {
+                    const active = day.key === selectedPickupDay.key;
+                    return (
+                      <button
+                        key={day.key}
+                        type="button"
+                        disabled={!day.hasFree}
+                        onClick={() => pickPickupDay(day.key)}
+                        aria-pressed={active}
+                        style={{
+                          minHeight: "52px", padding: "8px 6px", borderRadius: "12px",
+                          display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", gap: "2px",
+                          fontSize: "12.5px", fontWeight: 800, cursor: day.hasFree ? "pointer" : "not-allowed",
+                          backgroundColor: active ? "var(--accent-soft)" : "var(--bg-card)",
+                          color: active ? "var(--fg)" : day.hasFree ? "var(--fg-secondary)" : "var(--fg-faint)",
+                          border: active ? "1.5px solid var(--accent)" : "1.5px solid var(--border)",
+                          boxShadow: active ? "0 0 0 1px var(--accent) inset" : "none",
+                          opacity: day.hasFree ? 1 : 0.55,
+                        }}
+                      >
+                        <span>{day.title}</span>
+                        <span style={{ fontSize: "10.5px", fontWeight: 600, opacity: 0.75 }}>
+                          {day.hasFree ? day.dateLabel : "ไม่ว่าง"}
+                        </span>
+                      </button>
                     );
-                    const unique = quickValues.filter(
-                      (v, i, arr): v is string => Boolean(v) && arr.indexOf(v) === i
-                    );
-                    if (!unique.length) {
-                      return (
-                        <div style={{ fontSize: "12.5px", color: "var(--fg-faint)" }}>
-                          ไม่มีช่วงเวลาที่รับได้แล้ว กรุณาเลือกวัน-เวลาเอง
-                        </div>
-                      );
-                    }
-                    return unique.map((value) => {
-                      const active = claimPickupDate === value;
-                      return (
-                        <button
-                          key={value}
-                          type="button"
-                          onClick={() => setClaimPickupDate(value)}
-                          style={{
-                            padding: "8px 12px", borderRadius: 999, fontSize: "12.5px", fontWeight: 700,
-                            cursor: "pointer", backgroundColor: active ? "var(--accent)" : "var(--bg-card)",
-                            color: active ? "var(--accent-fg)" : "var(--fg-secondary)",
-                            border: active ? "1.5px solid var(--accent)" : "1.5px solid var(--border)",
-                          }}
-                        >
-                          {formatPickupForDisplay(value)}
-                        </button>
-                      );
-                    });
-                  })()}
+                  })}
                 </div>
 
-                {/* ช่องเลือกวัน และ เวลา */}
-                <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "10px", marginTop: "14px" }}>
-                  <div>
-                    <label htmlFor="claim-pickup-date" style={{ display: "block", fontSize: "12.5px", fontWeight: 700, color: "var(--fg-secondary)", marginBottom: "6px" }}>
-                      วันที่
-                    </label>
-                    <input
-                      id="claim-pickup-date"
-                      type="date"
-                      value={pickupDatePart}
-                      min={pickupWindow.min.slice(0, 10)}
-                      max={pickupWindow.max.slice(0, 10)}
-                      onChange={(e) => {
-                        const d = e.target.value;
-                        if (!d) {
-                          setClaimPickupDate("");
-                          return;
-                        }
-                        // เวลาเริ่มต้นของวันใหม่ต้องอยู่ใน 07:00-16:00 เสมอ
-                        setClaimPickupDate(
-                          toLocalDateTimeInput(clampPickupTimeOfDay(new Date(`${d}T${pickupTimePart || "10:00"}`)))
-                        );
-                      }}
-                      style={{
-                        width: "100%", minHeight: "44px", padding: "10px 12px", borderRadius: "10px",
-                        border: "1.5px solid var(--border)", fontSize: "13.5px", outline: "none",
-                        boxSizing: "border-box", backgroundColor: "var(--bg-card)", color: "var(--fg)",
-                        colorScheme: "dark",
-                      }}
-                    />
-                  </div>
-                  <div>
-                    <label htmlFor="claim-pickup-time" style={{ display: "block", fontSize: "12.5px", fontWeight: 700, color: "var(--fg-secondary)", marginBottom: "6px" }}>
-                      เวลา
-                    </label>
-                    <input
-                      id="claim-pickup-time"
-                      type="time"
-                      value={pickupTimePart}
-                      step={300}
-                      onChange={(e) => {
-                        const t = e.target.value;
-                        if (!t) {
-                          setClaimPickupDate("");
-                          return;
-                        }
-                        // บีบเวลาให้อยู่ใน 07:00-16:00 (เลือกได้เฉพาะช่วงที่จุดรับของเปิด)
-                        const picked = new Date(
-                          `${pickupDatePart || pickupWindow.min.slice(0, 10)}T${t}`
-                        );
-                        if (Number.isNaN(picked.getTime())) return;
-                        setClaimPickupDate(toLocalDateTimeInput(clampPickupTimeOfDay(picked)));
-                      }}
-                      style={{
-                        width: "100%", minHeight: "44px", padding: "10px 12px", borderRadius: "10px",
-                        border: "1.5px solid var(--border)", fontSize: "13.5px", outline: "none",
-                        boxSizing: "border-box", backgroundColor: "var(--bg-card)", color: "var(--fg)",
-                        colorScheme: "dark",
-                      }}
-                    />
-                  </div>
-                </div>
-
-                <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: "10px", marginTop: "12px", flexWrap: "wrap" }}>
-                  <div style={{ fontSize: "12px", color: "var(--fg-faint)", lineHeight: 1.6 }}>
-                    เปิดรับ 07:00-16:00 · นัดได้ภายใน 3 วันนับจากวันนี้
-                    <br />
-                    ตั้งแต่ {pickupWindow.min.replace("T", " ")} ถึง {pickupWindow.max.replace("T", " ")}
+                {/* เลือกช่วงเวลา — ปุ่มกดแทน time picker (ขนาดกดใหญ่ ≥44px บนมือถือ) */}
+                <div
+                  style={{
+                    display: "flex", alignItems: "center", justifyContent: "space-between", gap: "10px",
+                    margin: "16px 0 8px",
+                  }}
+                >
+                  <div style={{ fontSize: "12.5px", fontWeight: 700, color: "var(--fg-secondary)" }}>
+                    เลือกเวลา · {selectedPickupDay.title} {selectedPickupDay.dateLabel}
                   </div>
                   {claimPickupDate && (
                     <button
                       type="button"
                       onClick={() => setClaimPickupDate("")}
                       style={{
-                        display: "inline-flex", alignItems: "center", gap: "5px", padding: "6px 10px",
-                        borderRadius: 8, fontSize: "12.5px", fontWeight: 700, cursor: "pointer",
+                        display: "inline-flex", alignItems: "center", gap: "5px", padding: "5px 10px",
+                        borderRadius: 8, fontSize: "12px", fontWeight: 700, cursor: "pointer",
                         backgroundColor: "transparent", color: "var(--fg-muted)", border: "1.5px solid var(--border)",
                       }}
                     >
-                      <X size={13} /> ล้าง
+                      <X size={12} /> ล้าง
                     </button>
                   )}
+                </div>
+
+                {pickupSlotsOfDay.every((s) => s.disabled) ? (
+                  <div
+                    style={{
+                      padding: "12px", borderRadius: "10px", fontSize: "12.5px", color: "var(--fg-faint)",
+                      backgroundColor: "var(--bg-card)", border: "1.5px dashed var(--border)", textAlign: "center",
+                    }}
+                  >
+                    วันนี้ไม่มีช่วงเวลาที่รับได้แล้ว — เลือกวันถัดไป
+                  </div>
+                ) : (
+                  pickupSlotGroups.map((group) => (
+                    <div key={group.title} style={{ marginBottom: "10px" }}>
+                      <div style={{ fontSize: "11.5px", fontWeight: 700, color: "var(--fg-faint)", marginBottom: "6px" }}>
+                        {group.title}
+                      </div>
+                      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(64px, 1fr))", gap: "8px" }}>
+                        {group.slots.map((slot) => {
+                          const active = claimPickupDate === slot.value;
+                          return (
+                            <button
+                              key={slot.value}
+                              type="button"
+                              disabled={slot.disabled}
+                              onClick={() => setClaimPickupDate(slot.value)}
+                              aria-pressed={active}
+                              style={{
+                                minHeight: "44px", padding: "8px 4px", borderRadius: "10px",
+                                fontSize: "13.5px", fontWeight: 700, cursor: slot.disabled ? "not-allowed" : "pointer",
+                                backgroundColor: active ? "var(--accent)" : "var(--bg-card)",
+                                color: active ? "var(--accent-fg)" : slot.disabled ? "var(--fg-faint)" : "var(--fg-secondary)",
+                                border: active ? "1.5px solid var(--accent)" : "1.5px solid var(--border)",
+                                opacity: slot.disabled ? 0.45 : 1,
+                              }}
+                            >
+                              {slot.label}
+                            </button>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  ))
+                )}
+
+                <div style={{ fontSize: "11.5px", color: "var(--fg-faint)", marginTop: "10px", lineHeight: 1.6 }}>
+                  เปิดรับ 07:00-16:00 · นัดได้ภายใน 3 วันนับจากวันนี้
+                  <br />
+                  ตั้งแต่ {formatPickupForDisplay(pickupWindow.min)} ถึง {formatPickupForDisplay(pickupWindow.max)}
                 </div>
               </div>
             )}

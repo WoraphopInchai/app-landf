@@ -558,7 +558,11 @@ function App() {
   return (
     <div
       style={{
-        minHeight: "100vh",
+        // หน้าแชต้องเต็มความสูงจอจริง (dvh) ถึงช่องพิมพ์จะติดล่างสุด
+        // หน้าอื่นปล่อยให้เลื่อนเนื้อหาได้ตามปกติ
+        ...(activePage === "chat" && !selectedItem
+          ? { height: "100dvh" }
+          : { minHeight: "100vh" }),
         backgroundColor: "var(--bg)",
         display: "flex",
         flexDirection: "column",
@@ -600,7 +604,8 @@ function App() {
         <div
           style={{
             width: "100%",
-            maxWidth: 1180,
+            // หน้าแชทไม่จำกัดความกว้าง — ต้องเต็มจอ
+            maxWidth: activePage === "chat" && !selectedItem ? "none" : 1180,
             margin: "0 auto",
             minHeight: 0,
             height: "100%",

@@ -15,12 +15,14 @@ import {
   GraduationCap,
   Users,
 } from "lucide-react";
+import { updateProfile } from "firebase/auth";
 import { doc, getDoc, updateDoc, collection, addDoc, serverTimestamp, query, where, getDocs, orderBy, limit, onSnapshot, writeBatch } from "firebase/firestore";
 import { auth, db } from "../firebase";
 import type { AppUser } from "../types";
 import ToastContainer from "../components/Toast";
 import Dialog, { DialogButton } from "../components/Dialog";
 import { showToast } from "../lib/toast";
+import { CLAIM_ROLE_LABEL } from "../lib/claimRole";
 import { isCurrentUserBanned } from "../lib/userGuard";
 
 interface AdminReply {
@@ -38,6 +40,42 @@ interface ProfileProps {
   onBack: () => void;
   onLogout: () => void;
   onNameUpdated?: (name: string) => void;
+}
+
+// ป้ายบอกโรล — ไม่มีคำอธิบายเพิ่ม โรลที่ใช้งานอยู่จะเรืองแสง ที่เหลือจางลง
+function RoleChip({
+  label,
+  icon,
+  active,
+}: {
+  label: string;
+  icon: React.ReactNode;
+  active: boolean;
+}) {
+  return (
+    <div
+      style={{
+        display: "flex",
+        alignItems: "center",
+        gap: "8px",
+        padding: "10px 12px",
+        borderRadius: "12px",
+        fontSize: "12.5px",
+        fontWeight: 700,
+        border: "1px solid",
+        transition: "all 0.15s ease",
+        color: active ? "var(--fg)" : "var(--fg-faint)",
+        backgroundColor: active ? "var(--bg-hover)" : "transparent",
+        borderColor: active ? "var(--fg-accent)" : "var(--border)",
+        boxShadow: active ? "0 0 0 1px var(--fg-accent) inset" : "none",
+      }}
+    >
+      <span style={{ color: active ? "var(--fg-accent)" : "var(--fg-faint)", display: "flex" }}>
+        {icon}
+      </span>
+      <span>{label}</span>
+    </div>
+  );
 }
 
 // อัปเดตชื่อที่ snapshot ไว้ตอนสร้าง (posts.reporterName, claims.claimantName, reports.reporterName)
@@ -114,6 +152,12 @@ export default function Profile({ user, onBack, onLogout, onNameUpdated }: Profi
     try {
       if (uid) {
         await updateDoc(doc(db, "users", uid), { name: newName });
+        // ซิงก์ชื่อให้ตรงกับ Firebase Auth ด้วย (ถ้าทำไม่ได้ไม่กระทบชื่อที่บันทึกไว้ใน Firestore)
+        try {
+          await updateProfile(auth.currentUser!, { displayName: newName });
+        } catch (error) {
+          console.warn("ซิงก์ชื่อกับ Firebase Auth ไม่สำเร็จ:", error);
+        }
         // อัปเดตชื่อย้อนหลังใน documents ที่แอดมินมองเห็น (โพสต์ / คำขอรับของ / รายงาน)
         try {
           await renameHistoricalDocs(uid, newName);
@@ -334,23 +378,25 @@ export default function Profile({ user, onBack, onLogout, onNameUpdated }: Profi
         <div style={{ fontSize: "17px", fontWeight: 800, color: "var(--fg)" }}>{displayName}</div>
         <div style={{ fontSize: "13px", color: "var(--fg-muted)", marginTop: "2px" }}>{user?.email}</div>
 
-        <div
-          style={{
-            display: "flex",
-            alignItems: "center",
-            gap: "6px",
-            backgroundColor: "rgba(124, 92, 252, 0.14)",
-            border: "1px solid rgba(124, 92, 252, 0.35)",
-            color: "var(--fg-accent)",
-            padding: "4px 12px",
-            borderRadius: "20px",
-            fontSize: "11px",
-            fontWeight: 700,
-            marginTop: "10px",
-          }}
-        >
-          <ShieldCheck size={13} /> <span>ยืนยันตัวตนด้วยอีเมลมหาวิทยาลัย</span>
-        </div>
+        {isAdminAccount || accountType === "student" ? (
+          <div
+            style={{
+              display: "inline-flex",
+              alignItems: "center",
+              gap: "6px",
+              backgroundColor: "rgba(124, 92, 252, 0.14)",
+              border: "1px solid rgba(124, 92, 252, 0.35)",
+              color: "var(--fg-accent)",
+              padding: "4px 12px",
+              borderRadius: "20px",
+              fontSize: "11px",
+              fontWeight: 700,
+              marginTop: "10px",
+            }}
+          >
+            <ShieldCheck size={13} /> <span>ยืนยันตัวตนด้วยอีเมลมหาวิทยาลัย</span>
+          </div>
+        ) : null}
       </div>
 
       {/* Settings / Form List */}
@@ -455,37 +501,30 @@ export default function Profile({ user, onBack, onLogout, onNameUpdated }: Profi
         </div>
 
         {/* ประเภทบัญชี (ช่องทางที่เลือกตอนเข้าสู่ระบบ — ป้ายบอกประเภท ไม่เปลี่ยนสิทธิ์การใช้งาน) */}
+        {/* โรล (บอกแค่โรล ไม่ต้องมีคำอธิบายเพิ่ม) */}
         <div style={{ backgroundColor: "var(--bg-card)", borderRadius: "16px", padding: "16px", border: "1px solid var(--border)", boxShadow: "0 2px 6px rgba(0,0,0,0.3)" }}>
-          <div style={{ display: "flex", alignItems: "center", gap: "8px", fontSize: "13px", fontWeight: 700, color: "var(--fg)", marginBottom: "6px" }}>
+          <div style={{ display: "flex", alignItems: "center", gap: "8px", fontSize: "13px", fontWeight: 700, color: "var(--fg)", marginBottom: "10px" }}>
             {isAdminAccount
               ? <ShieldCheck size={15} color="var(--fg-accent)" />
               : accountType === "student"
                 ? <GraduationCap size={15} color="var(--fg-accent)" />
                 : <Users size={15} color="var(--fg-accent)" />}
-            <span>ประเภทบัญชี</span>
+            <span>โรล</span>
           </div>
-          <div
-            style={{
-              display: "inline-flex",
-              alignItems: "center",
-              gap: "6px",
-              padding: "6px 12px",
-              borderRadius: "999px",
-              fontSize: "12.5px",
-              fontWeight: 700,
-              color: isAdminAccount ? "#fcd34d" : accountType === "student" ? "#c4b5fd" : "#5eead4",
-              backgroundColor: isAdminAccount ? "rgba(245,158,11,0.14)" : accountType === "student" ? "rgba(124,92,252,0.14)" : "rgba(13,148,136,0.14)",
-              border: "1px solid " + (isAdminAccount ? "rgba(245,158,11,0.35)" : accountType === "student" ? "rgba(124,92,252,0.35)" : "rgba(13,148,136,0.35)"),
-            }}
-          >
-            {isAdminAccount ? "ผู้ดูแลระบบ" : accountType === "student" ? "นิสิตและบุคลากรมหาวิทยาลัย" : "บุคคลทั่วไป"}
-          </div>
-          <div style={{ fontSize: "11.5px", color: "var(--fg-muted)", marginTop: "8px", lineHeight: 1.5 }}>
-            {isAdminAccount
-              ? "เข้าสู่ระบบผ่านช่องทางผู้ดูแลระบบ (ตรวจสิทธิ์จากฐานข้อมูล)"
-              : accountType === "student"
-                ? "เข้าสู่ระบบผ่านช่องทางนิสิตและบุคลากร (ยืนยันด้วยอีเมล @up.ac.th)"
-                : "เข้าสู่ระบบผ่านช่องทางบุคคลทั่วไป (ไม่มีเงื่อนไขอีเมล)"}
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(150px, 1fr))", gap: "8px" }}>
+            <RoleChip
+              label={CLAIM_ROLE_LABEL.student}
+              icon={<GraduationCap size={13} />}
+              active={!isAdminAccount && accountType === "student"}
+            />
+            <RoleChip
+              label={CLAIM_ROLE_LABEL.public}
+              icon={<Users size={13} />}
+              active={!isAdminAccount && accountType !== "student"}
+            />
+            {isAdminAccount && (
+              <RoleChip label="ผู้ดูแลระบบ" icon={<ShieldCheck size={13} />} active />
+            )}
           </div>
         </div>
 

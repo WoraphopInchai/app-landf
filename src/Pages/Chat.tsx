@@ -2,7 +2,6 @@ import { useState, useEffect, useRef, useCallback, useMemo, Fragment, type React
 import {
   ArrowLeft,
   Send,
-  MoreVertical,
   UserCircle,
   MessageSquare,
   Search,
@@ -794,7 +793,7 @@ export default function Chat({ currentUser, onOpenProfile, initialChat }: ChatPr
 
     const detailTyping = (
       <div style={{ display: "flex", justifyContent: "flex-start" }}>
-        <div style={{ maxWidth: "70%" }}>
+        <div style={{ maxWidth: "min(70%, 720px)", width: "100%" }}>
           <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
             <div
               style={{
@@ -854,9 +853,10 @@ export default function Chat({ currentUser, onOpenProfile, initialChat }: ChatPr
 
     return (
       <div
-        className="laf-page-scroll"
+        className="laf-page-scroll laf-chat-fullscreen"
         style={{
           flex: 1,
+          height: "100%",
           minHeight: 0,
           width: "100%",
           display: "flex",
@@ -944,8 +944,6 @@ export default function Chat({ currentUser, onOpenProfile, initialChat }: ChatPr
                 : "แชทในระบบ UP Lost & Found"}
             </div>
           </div>
-
-          <MoreVertical size={19} color="var(--fg-faint)" style={{ cursor: "pointer", flexShrink: 0 }} />
         </div>
 
         {/* Error Banner */}
@@ -968,19 +966,19 @@ export default function Chat({ currentUser, onOpenProfile, initialChat }: ChatPr
           </div>
         )}
 
-        {/* Messages */}
+        {/* Messages — flex-1 + overflow-y:auto = กินความสูงที่เหลือทั้งหมด */}
         <div
+          className="laf-chat-body"
           style={{
             flex: 1,
             minHeight: 0,
             overflowY: "auto",
-            padding: "20px 20px 24px",
+            overscrollBehavior: "contain",
+            padding: "20px clamp(12px, 3vw, 28px) 24px",
             display: "flex",
             flexDirection: "column",
             gap: 10,
             width: "100%",
-            maxWidth: 780,
-            alignSelf: "center",
           }}
         >
           <div style={{ display: "flex", justifyContent: "center", marginBottom: 6 }}>
@@ -1118,7 +1116,7 @@ export default function Chat({ currentUser, onOpenProfile, initialChat }: ChatPr
                         {otherName}
                       </div>
                     )}
-                  <div style={{ maxWidth: "75%" }}>
+                  <div style={{ maxWidth: "min(75%, 720px)", width: "100%" }}>
                     <div
                       style={{
                         padding: "10px 14px",
@@ -1179,12 +1177,12 @@ export default function Chat({ currentUser, onOpenProfile, initialChat }: ChatPr
           <div ref={messagesEndRef} />
         </div>
 
-        {/* Input Area */}
+        {/* Input Area — ช่องพิมพ์ติดด้านล่างสุดเสมอ */}
         <div
-          className="laf-page-header"
+          className="laf-page-header laf-chat-footer"
           style={{
             borderTop: "1px solid var(--border)",
-            padding: "12px 16px 14px",
+            padding: "12px clamp(12px, 3vw, 28px) 14px",
             flexShrink: 0,
             boxShadow: "0 -2px 12px rgba(0, 0, 0, 0.3)",
           }}
@@ -1192,8 +1190,6 @@ export default function Chat({ currentUser, onOpenProfile, initialChat }: ChatPr
           <div
             style={{
               width: "100%",
-              maxWidth: 780,
-              margin: "0 auto",
               display: "flex",
               flexDirection: "column",
               gap: 8,
@@ -1263,10 +1259,12 @@ export default function Chat({ currentUser, onOpenProfile, initialChat }: ChatPr
   // =========================
   return (
     <div
-      className="laf-page-scroll"
+      className="laf-page-scroll laf-chat-fullscreen"
       style={{
         flex: 1,
+        height: "100%",
         minHeight: 0,
+        width: "100%",
         overflowY: "auto",
         display: "flex",
         flexDirection: "column",
@@ -1437,7 +1435,7 @@ export default function Chat({ currentUser, onOpenProfile, initialChat }: ChatPr
       )}
 
       {/* Chat List */}
-      <div style={{ padding: "16px 16px 24px", maxWidth: 760, margin: "0 auto", width: "100%", flex: 1, minHeight: 0 }}>
+      <div style={{ padding: "16px clamp(12px, 3vw, 28px) 24px", width: "100%", flex: 1, minHeight: 0 }}>
         {chatLoading ? (
           <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 12, padding: "60px 20px", color: "var(--fg-muted)", fontSize: 13 }}>
             <div

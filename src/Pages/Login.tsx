@@ -123,13 +123,24 @@ export default function Login({ onLogin, onAdminDenied, onLoginStart, onLoginCan
           return;
         }
 
+        // โรลขึ้นกับโดเมนอีเมลจริงเสมอ — ไม่ขึ้นกับแท็บที่เผือกไว้
+        // @up.ac.th = นิสิต/บุคลากร · อีเมลอื่นทั้งหมด = บุคคลทั่วไป · แอดมิน = ผู้ดูแลระบบ
+        const upEmail = isUpEmail(email);
+        const resolvedChannel: LoginChannel =
+          loginType === "admin" ? "admin" : upEmail ? "student" : "general";
+        if (loginType === "general" && upEmail) {
+          showToast("อีเมล @up.ac.th ของคุณถูกจัดเป็นโรลนิสิตและบุคลากรให้อัตโนมัติ", "info");
+        }
+
         // เขียนแบบ best-effort: ถ้า rules ไม่อนุญาตให้บันทึก role (ยังไม่ deploy กฎใหม่)
         // ให้ log ไว้แล้วล็อกอินต่อได้ กัน login ค้าง
         try {
           await setDoc(
             userRef,
             {
-              name: user.displayName || existing?.name || "",
+              // ชื่อที่ผู้ใช้ตั้งเองในโปรไฟล์สำคัญกว่าชื่อจาก Google
+              // (ถ้าใส่ displayName ก่อน ชื่อที่แก้ไว้จะถูกทับทุกครั้งที่ล็อกอินใหม่)
+              name: existing?.name || user.displayName || "",
               email: user.email || existing?.email || "",
               role: adminRole || "user",
               banned: existing?.banned ?? false,
@@ -142,13 +153,13 @@ export default function Login({ onLogin, onAdminDenied, onLoginStart, onLoginCan
         }
 
         const accountType: "student" | "general" | null =
-          loginType === "admin" ? null : loginType;
+          resolvedChannel === "admin" ? null : resolvedChannel;
 
-        console.log("เข้าสู่ระบบสำเร็จ:", user.displayName, `(${loginType})`);
+        console.log("เข้าสู่ระบบสำเร็จ:", user.displayName, `(${resolvedChannel})`);
         if (onLogin)
           onLogin({
             ...user,
-            loginRole: loginType === "admin" ? "admin" : "user",
+            loginRole: resolvedChannel === "admin" ? "admin" : "user",
             accountType,
             adminRole,
             adminPoint: staffPointName || null,
